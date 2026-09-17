@@ -13,6 +13,8 @@ export interface ServiceCategoryRef {
   name: string;
   /** Position on the booking page, lower first. */
   sort_order: number;
+  /** A heading this venue's collective manages: its host names it (W6). */
+  managed?: boolean;
 }
 
 /** One heading on a booking page and the services listed under it. */

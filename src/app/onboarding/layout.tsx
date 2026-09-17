@@ -6,7 +6,7 @@ import { isPlatformSuperuser } from '@/lib/platform-auth';
 import { hasActiveVenueSupportSession } from '@/lib/support-session-server';
 import { resolveActiveBookingModels } from '@/lib/booking/active-models';
 import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
-import { getVenueStaff } from '@/lib/venue-auth';
+import { getDashboardStaff, getVenueStaff } from '@/lib/venue-auth';
 import {
   ONBOARDING_LAYOUT_MAX_WIDTH_CLASS,
   ONBOARDING_SHELL_MAX_WIDTH_CLASS,
@@ -26,7 +26,8 @@ export default async function OnboardingLayout({ children }: { children: React.R
   }
   const staff = await getVenueStaff(supabase);
   if (!staff) {
-    redirect('/signup/business-type');
+    const dashboardStaff = await getDashboardStaff(supabase);
+    redirect(dashboardStaff.multipleVenues ? '/auth/venue-locked' : '/signup/business-type');
   }
   const { data: venue } = await staff.db
     .from('venues')

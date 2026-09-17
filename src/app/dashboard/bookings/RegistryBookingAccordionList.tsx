@@ -476,6 +476,13 @@ export function RegistryBookingAccordionList({
                       {durationBarLabel}
                     </span>
                   ) : null}
+                  {b.collective_id ? (
+                    <span className={expanded ? 'inline-flex' : 'hidden sm:inline-flex'}>
+                      <Pill variant="neutral" size="sm">
+                        via {b.collective_name ?? 'collective'}
+                      </Pill>
+                    </span>
+                  ) : null}
                   {(b.addons_count ?? 0) > 0 && (
                     <Pill variant="info" size="sm">
                       +{b.addons_count} {b.addons_count === 1 ? 'extra' : 'extras'}

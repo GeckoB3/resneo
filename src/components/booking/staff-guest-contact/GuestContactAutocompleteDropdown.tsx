@@ -5,6 +5,7 @@ import {
   guestSearchResultSubtitle,
 } from '@/components/dashboard/toolbar-guest-search/guest-search-helpers';
 import type { GuestListRow } from '@/types/contacts';
+import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 
 interface GuestContactAutocompleteDropdownProps {
   results: GuestListRow[];
@@ -41,6 +42,11 @@ function GuestContactResultRow({
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold text-slate-900">{label}</p>
           <p className="truncate text-[11px] text-slate-500">{subtitle}</p>
+          {row.owner_venue_name && row.owner_is_self === false ? (
+            <p className="truncate text-[11px] font-medium text-brand-700">
+              {collectiveCopy('staff.contact.ownerLine', { venue: row.owner_venue_name })}
+            </p>
+          ) : null}
         </div>
       </button>
     </li>

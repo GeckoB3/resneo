@@ -12,6 +12,12 @@ import type {
 import { formatDepositAmount } from '@/lib/emails/templates/base-template';
 import { getResourceBookingEmailLabels } from '@/lib/booking/resource-booking-email-labels';
 import { resolveBookingCoreDurationMinutes } from '@/lib/booking/booking-core-duration';
+import {
+  applicableCalendarValues,
+  calendarPricePence,
+  type CalendarAssignmentRow,
+  type CalendarAssignmentValues,
+} from '@/lib/booking/calendar-service-terms';
 
 function priceDisplayFromPence(pricePence: number | null | undefined): string | null {
   if (pricePence == null) return null;
@@ -60,6 +66,8 @@ export type BookingAnchorRow = {
   calendar_id: string | null;
   service_item_id: string | null;
   service_variant_id: string | null;
+  /** The service line's price when booked (20270212120000); preferred to the live catalogue. */
+  service_price_snapshot_pence?: number | null;
   group_booking_id: string | null;
   guest_id: string | null;
   person_label: string | null;
@@ -165,7 +173,7 @@ async function resolveAppointmentLabels(
   if (legacyPr && legacySvc) {
     const [{ data: pr }, { data: svc }, { data: variant }, { data: link }] = await Promise.all([
       supabase.from('practitioners').select('name').eq('id', legacyPr).maybeSingle(),
-      supabase.from('appointment_services').select('name, price_pence').eq('id', legacySvc).maybeSingle(),
+      supabase.from('appointment_services').select('name, price_pence, staff_may_customize_price').eq('id', legacySvc).maybeSingle(),
       variantPromise,
       supabase
         .from('practitioner_services')
@@ -178,7 +186,10 @@ async function resolveAppointmentLabels(
     // service price, then a chosen variant replaces both. Without the override here,
     // reminders/re-sends show the base price while the original confirmation (which is
     // built from the booking-time price) shows the practitioner's price.
-    const basePrice = (link as { custom_price_pence?: number | null } | null)?.custom_price_pence ?? svc?.price_pence ?? null;
+    const basePrice = calendarPricePence(
+      svc?.price_pence,
+      applicableCalendarValues(link as CalendarAssignmentValues | null, svc),
+    );
     const merged = applyVariantOverrides(svc?.name ?? null, basePrice, variant);
     return {
       practitionerName: pr?.name ?? null,
@@ -191,24 +202,33 @@ async function resolveAppointmentLabels(
   if (cal && item) {
     const [{ data: uc }, { data: si }, { data: variant }, { data: link }] = await Promise.all([
       supabase.from('unified_calendars').select('name').eq('id', cal).maybeSingle(),
-      supabase.from('service_items').select('name, price_pence').eq('id', item).maybeSingle(),
+      supabase
+        .from('service_items')
+        .select('name, price_pence, staff_may_customize_price, staff_may_customize_name')
+        .eq('id', item)
+        .maybeSingle(),
       variantPromise,
       supabase
         .from('calendar_service_assignments')
-        .select('custom_price_pence')
+        .select('custom_price_pence, custom_name')
         .eq('calendar_id', cal)
         .eq('service_item_id', item)
         .maybeSingle(),
     ]);
     // Per-calendar price override replaces the base price, then the variant replaces both
     // (mirrors booking-time pricing so reminders match the original confirmation).
-    const basePrice = (link as { custom_price_pence?: number | null } | null)?.custom_price_pence ?? si?.price_pence ?? null;
-    const merged = applyVariantOverrides(si?.name ?? null, basePrice, variant);
+    const applicable = applicableCalendarValues(link as CalendarAssignmentRow | null, si);
+    const basePrice = calendarPricePence(si?.price_pence, applicable);
+    // The calendar's own name while the service allows one, as the booking page and the booking's
+    // name snapshot show it (TERMS-13).
+    const merged = applyVariantOverrides(applicable.custom_name ?? si?.name ?? null, basePrice, variant);
+    // A reminder quotes the price that was agreed, not whatever the catalogue says today.
+    const agreed = typeof row.service_price_snapshot_pence === 'number' ? row.service_price_snapshot_pence : merged.price;
     return {
       practitionerName: uc?.name ?? null,
       serviceName: merged.name,
-      appointmentPriceDisplay: priceDisplayFromPence(merged.price),
-      servicePricePence: merged.price,
+      appointmentPriceDisplay: priceDisplayFromPence(agreed),
+      servicePricePence: agreed,
     };
   }
 
@@ -250,7 +270,7 @@ export async function enrichBookingEmailForAppointment(
   const { data: row, error } = await supabase
     .from('bookings')
     .select(
-      'booking_model, booking_date, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, group_booking_id, guest_id, person_label, location_type, client_address_line1, client_address_line2, client_address_city, client_address_postcode',
+      'booking_model, booking_date, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, service_price_snapshot_pence, group_booking_id, guest_id, person_label, location_type, client_address_line1, client_address_line2, client_address_city, client_address_postcode',
     )
     .eq('id', bookingId)
     .maybeSingle();
@@ -279,7 +299,7 @@ export async function enrichBookingEmailForAppointment(
     const { data: allSiblings } = await supabase
       .from('bookings')
       .select(
-        'id, booking_date, booking_time, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, person_label',
+        'id, booking_date, booking_time, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, service_price_snapshot_pence, person_label',
       )
       .eq('group_booking_id', anchor.group_booking_id)
       .eq('guest_id', anchor.guest_id)
@@ -301,9 +321,9 @@ export async function enrichBookingEmailForAppointment(
 
       const [{ data: pracs }, { data: svcs }, { data: cals }, { data: items }, { data: variants }, { data: addonRows }, { data: psLinks }, { data: csaLinks }] = await Promise.all([
         prIds.length ? supabase.from('practitioners').select('id, name').in('id', prIds) : { data: [] },
-        svcIds.length ? supabase.from('appointment_services').select('id, name, price_pence').in('id', svcIds) : { data: [] },
+        svcIds.length ? supabase.from('appointment_services').select('id, name, price_pence, staff_may_customize_price').in('id', svcIds) : { data: [] },
         calIds.length ? supabase.from('unified_calendars').select('id, name').in('id', calIds) : { data: [] },
-        itemIds.length ? supabase.from('service_items').select('id, name, price_pence').in('id', itemIds) : { data: [] },
+        itemIds.length ? supabase.from('service_items').select('id, name, price_pence, staff_may_customize_price, staff_may_customize_name').in('id', itemIds) : { data: [] },
         variantIds.length ? supabase.from('service_variants').select('id, name, price_pence').in('id', variantIds) : { data: [] },
         siblingIds.length
           ? supabase
@@ -324,7 +344,7 @@ export async function enrichBookingEmailForAppointment(
         calIds.length && itemIds.length
           ? supabase
               .from('calendar_service_assignments')
-              .select('calendar_id, service_item_id, custom_price_pence')
+              .select('calendar_id, service_item_id, custom_price_pence, custom_name')
               .in('calendar_id', calIds)
               .in('service_item_id', itemIds)
           : { data: [] },
@@ -346,15 +366,20 @@ export async function enrichBookingEmailForAppointment(
       const prMap = new Map((pracs ?? []).map((p: { id: string; name: string }) => [p.id, p.name]));
       const calMap = new Map((cals ?? []).map((c: { id: string; name: string }) => [c.id, c.name]));
       const svMap = new Map(
-        (svcs ?? []).map((s: { id: string; name: string; price_pence: number | null }) => [
+        (svcs ?? []).map((s: { id: string; name: string; price_pence: number | null; staff_may_customize_price?: boolean | null }) => [
           s.id,
-          { name: s.name, price_pence: s.price_pence },
+          { name: s.name, price_pence: s.price_pence, staff_may_customize_price: s.staff_may_customize_price },
         ]),
       );
       const itemMap = new Map(
-        (items ?? []).map((s: { id: string; name: string; price_pence: number | null }) => [
+        (items ?? []).map((s: { id: string; name: string; price_pence: number | null; staff_may_customize_price?: boolean | null; staff_may_customize_name?: boolean | null }) => [
           s.id,
-          { name: s.name, price_pence: s.price_pence },
+          {
+            name: s.name,
+            price_pence: s.price_pence,
+            staff_may_customize_price: s.staff_may_customize_price,
+            staff_may_customize_name: s.staff_may_customize_name,
+          },
         ]),
       );
       const variantMap = new Map(
@@ -367,15 +392,15 @@ export async function enrichBookingEmailForAppointment(
         (psLinks ?? []).map(
           (l: { practitioner_id: string; service_id: string; custom_price_pence: number | null }) => [
             `${l.practitioner_id}:${l.service_id}`,
-            l.custom_price_pence,
+            l as CalendarAssignmentValues,
           ],
         ),
       );
       const csaOverrideMap = new Map(
         (csaLinks ?? []).map(
-          (l: { calendar_id: string; service_item_id: string; custom_price_pence: number | null }) => [
+          (l: { calendar_id: string; service_item_id: string; custom_price_pence: number | null; custom_name?: string | null }) => [
             `${l.calendar_id}:${l.service_item_id}`,
-            l.custom_price_pence,
+            l as CalendarAssignmentRow,
           ],
         ),
       );
@@ -413,8 +438,10 @@ export async function enrichBookingEmailForAppointment(
         if (pid && sid) {
           practitionerNameLine = prMap.get(pid) ?? 'Staff';
           const sv = svMap.get(sid);
-          const overridePence = psOverrideMap.get(`${pid}:${sid}`) ?? null;
-          const basePrice = overridePence ?? sv?.price_pence ?? null;
+          const basePrice = calendarPricePence(
+            sv?.price_pence,
+            applicableCalendarValues(psOverrideMap.get(`${pid}:${sid}`), sv),
+          );
           const merged = applyVariantOverrides(sv?.name ?? null, basePrice, variant);
           serviceNameLine = merged.name ?? 'Treatment';
           priceDisplay = priceDisplayFromPence(merged.price);
@@ -422,12 +449,14 @@ export async function enrichBookingEmailForAppointment(
         } else if (cid && iid) {
           practitionerNameLine = calMap.get(cid) ?? 'Staff';
           const it = itemMap.get(iid);
-          const overridePence = csaOverrideMap.get(`${cid}:${iid}`) ?? null;
-          const basePrice = overridePence ?? it?.price_pence ?? null;
-          const merged = applyVariantOverrides(it?.name ?? null, basePrice, variant);
+          const applicable = applicableCalendarValues(csaOverrideMap.get(`${cid}:${iid}`), it);
+          const basePrice = calendarPricePence(it?.price_pence, applicable);
+          const merged = applyVariantOverrides(applicable.custom_name ?? it?.name ?? null, basePrice, variant);
+          const snapshot = s.service_price_snapshot_pence as number | null;
+          const agreed = typeof snapshot === 'number' ? snapshot : merged.price;
           serviceNameLine = merged.name ?? 'Treatment';
-          priceDisplay = priceDisplayFromPence(merged.price);
-          servicePence = merged.price;
+          priceDisplay = priceDisplayFromPence(agreed);
+          servicePence = agreed;
         }
 
         // Person subtotal = service + variant + their add-ons. Shown only when add-ons

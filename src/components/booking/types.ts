@@ -50,6 +50,13 @@ export interface VenuePublic {
    * (and price/duration) live on each member venue's own source service.
    */
   is_collective?: boolean;
+  /**
+   * Set on a venue's own page while its appointments are booked on its collective's page but it
+   * also runs other booking types (plan §6.9, D44): the appointments tab shows a card linking there.
+   */
+  appointments_handover?: { collective_name: string; href: string } | null;
+  /** Collective page: how many venues have something bookable on it (UX spec `public.header.venues`). */
+  collective_venue_count?: number;
   /** When true, guests must sign in before completing an online booking. */
   require_account_login_for_bookings?: boolean;
   /** Resolved Phase 1a feature flags for public booking (subset). */

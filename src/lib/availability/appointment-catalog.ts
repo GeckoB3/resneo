@@ -25,6 +25,13 @@ import { loadVariantsForServices } from '@/lib/venue/service-variants';
 import {
   canonicalServiceShape, parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
 import { loadAddonGroupsForServices } from '@/lib/addons/addon-resolution';
+import { loadBookableServiceIds, withoutParked } from '@/lib/linked-accounts/replicas/parking';
+import type { RpcClient } from '@/lib/linked-accounts/replicas/crons';
+import {
+  applicableCalendarValues,
+  CALENDAR_ASSIGNMENT_LINK_COLUMNS,
+  type CalendarAssignmentRow,
+} from '@/lib/booking/calendar-service-terms';
 import type { AppointmentCatalogAddonGroup } from '@/types/booking-models';
 
 export interface AppointmentCatalogVariant {
@@ -134,6 +141,18 @@ export interface AppointmentCatalogOptions {
    * the catalogue's, and `assigned: false` so the picker can say so.
    */
   everyCalendarEveryService?: boolean;
+  /**
+   * List parked services too (plan §6.6, D2). Every surface that takes new bookings leaves them out,
+   * which is the default; only a management view that is not about booking (the legacy combined-page
+   * builder) asks for them.
+   */
+  includeParked?: boolean;
+  /**
+   * 'staff' lists services whose "staff bookings only" flag is off (`is_bookable_online = false`),
+   * which guests may not book themselves (plan §6.6). Public surfaces leave them out, which is the
+   * default; a staff booking surface and the management views ask for 'staff'.
+   */
+  audience?: 'public' | 'staff';
 }
 
 export function variantToCatalog(v: ServiceVariant): AppointmentCatalogVariant {
@@ -235,27 +254,34 @@ async function fetchUnifiedAppointmentCatalog(
       .order('name'),
     supabase
       .from('calendar_service_assignments')
-      .select('id, calendar_id, service_item_id, custom_duration_minutes, custom_price_pence')
+      .select(CALENDAR_ASSIGNMENT_LINK_COLUMNS)
       .in('calendar_id', calendarIds),
     fetchServiceCategoryRefs(supabase, venueId),
   ]);
 
-  const services = ((servicesRes.data ?? []) as Record<string, unknown>[]).map(serviceItemRowToAppointmentService);
+  // D2: a venue live in a collective lists only the collective's services for new bookings.
+  const bookable = options?.includeParked
+    ? null
+    : await loadBookableServiceIds(supabase as unknown as RpcClient, venueId);
+  // "Staff bookings only": guests never see these; staff surfaces do.
+  const serviceRows = ((servicesRes.data ?? []) as Record<string, unknown>[]).filter(
+    (row) => options?.audience === 'staff' || row.is_bookable_online !== false,
+  );
+  const services = withoutParked(
+    serviceRows.map(serviceItemRowToAppointmentService),
+    bookable,
+    (s) => s.id,
+  );
   const categoryFor = serviceCategoryLookup(categories);
+  // A calendar's own values, gated by its service's staff permission flags (W8).
+  const serviceRowById = new Map(serviceRows.map((row) => [row.id as string, row]));
   const practitionerServices: PractitionerService[] = (assignRes.data ?? []).map((a) => {
-    const row = a as {
-      id: string;
-      calendar_id: string;
-      service_item_id: string;
-      custom_duration_minutes: number | null;
-      custom_price_pence: number | null;
-    };
+    const row = a as CalendarAssignmentRow & { id: string; calendar_id: string; service_item_id: string };
     return {
       id: row.id,
       practitioner_id: row.calendar_id,
       service_id: row.service_item_id,
-      custom_duration_minutes: row.custom_duration_minutes,
-      custom_price_pence: row.custom_price_pence,
+      ...applicableCalendarValues(row, serviceRowById.get(row.service_item_id)),
     };
   });
 

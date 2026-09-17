@@ -1,6 +1,8 @@
 'use client';
 
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
+import type { HandoverReason } from '@/lib/linked-accounts/replicas/page-handover';
 
 /** The live venue collective a venue belongs to, as the Booking page tab needs it. */
 export interface SettingsCollectiveNote {
@@ -11,6 +13,45 @@ export interface SettingsCollectiveNote {
   hostVenueName: string;
   /** The combined page is served at this venue's own booking address. */
   adoptedThisVenue: boolean;
+  /**
+   * Shared-services collectives: whether this venue's own page hands over, and why not (§6.9).
+   * Absent on the older model, whose own page follows the venue's stored choice.
+   */
+  ownPage?: {
+    redirecting: boolean;
+    reason: HandoverReason | null;
+    /** "classes and events", which stay on the own page. */
+    otherModels: string | null;
+    /** `/book/{slug}`. */
+    ownPath: string | null;
+  } | null;
+}
+
+/** The own page's one-line status, in the words of UX spec `bp.status.*`. */
+export function OwnPageStatusLine({ collective }: { collective: SettingsCollectiveNote }) {
+  const own = collective.ownPage;
+  if (!own) return null;
+  const params = { collective: collective.name, host: collective.hostVenueName };
+  return (
+    <div data-testid="own-page-status" className="space-y-1 text-sm text-slate-700">
+      <p>
+        {own.redirecting
+          ? collectiveCopy('bp.status.redirecting', params)
+          : collectiveCopy('bp.status.showing', {
+              reason: collectiveCopy(`bp.reason.${own.reason ?? 'unavailable'}` as 'bp.reason.notLive', params),
+            })}
+      </p>
+      {own.redirecting && own.otherModels && own.ownPath ? (
+        <p>
+          {collectiveCopy('bm.redirect.otherModels', {
+            collective: collective.name,
+            modelList: own.otherModels,
+            link: own.ownPath,
+          })}
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 /** Which booking page the tab is managing. */
@@ -40,13 +81,17 @@ export function CombinedPageScopeSwitch({
       <SectionCard.Header
         eyebrow="Venue collective"
         title={`This venue is part of ${collective.name}`}
-        description={
+        description={`${
           collective.isHost
-            ? `This venue shares one booking page with the other members of ${collective.name}, and hosts it. Guests who book with you use the combined page. This venue’s own page is separate.`
-            : `This venue shares one booking page with the other members of ${collective.name}. ${collective.hostVenueName} hosts it. Guests who book with you use the combined page. This venue’s own page is separate.`
-        }
+            ? `This venue shares one booking page with the other members of ${collective.name}, and hosts it.`
+            : `This venue shares one booking page with the other members of ${collective.name}. ${collective.hostVenueName} hosts it.`
+        } Guests who book with you use the combined page.${
+          // On shared services the status line below says what the own page does; it is not separate then.
+          collective.ownPage ? '' : ' This venue’s own page is separate.'
+        }`}
       />
       <SectionCard.Body className="space-y-3">
+        <OwnPageStatusLine collective={collective} />
         {collective.adoptedThisVenue ? (
           <p className="text-sm text-slate-600">
             The combined page is served at this venue’s own address, so its settings are what guests see
@@ -56,7 +101,7 @@ export function CombinedPageScopeSwitch({
         <div
           role="tablist"
           aria-label="Which booking page to manage"
-          className="flex flex-wrap gap-1 border-b border-brand-200"
+          className="grid grid-cols-2 gap-1 border-b border-brand-200 sm:flex sm:flex-wrap"
           onKeyDown={(e) => {
             if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
             e.preventDefault();
@@ -77,7 +122,7 @@ export function CombinedPageScopeSwitch({
               aria-selected={scope === s.key}
               tabIndex={scope === s.key ? 0 : -1}
               onClick={() => onScopeChange(s.key)}
-              className={`-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition ${
+              className={`-mb-px border-b-2 px-2 py-2 text-center text-sm font-medium leading-snug transition sm:whitespace-nowrap sm:px-3 sm:text-left ${
                 scope === s.key
                   ? 'border-brand-600 text-brand-700'
                   : 'border-transparent text-slate-500 hover:text-slate-800'

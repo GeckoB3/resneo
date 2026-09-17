@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { stripe } from '@/lib/stripe';
+import { getSupabaseAdminClient } from '@/lib/supabase';
+import { recordStripeChargesEnabled } from '@/lib/stripe/charges-enabled';
 import { sanitizeAuthNextPath } from '@/lib/safe-auth-redirect';
 import { describeStripeConnectError } from '@/lib/stripe/connect-error-message';
 import { z } from 'zod';
@@ -137,6 +139,12 @@ export async function GET(request: NextRequest) {
     }
 
     const account = await stripe.accounts.retrieve(venue.stripe_connected_account_id);
+    // Keep the stored answer in step with what Stripe just said, in case a webhook was missed.
+    await recordStripeChargesEnabled(
+      getSupabaseAdminClient(),
+      venue.stripe_connected_account_id,
+      account.charges_enabled,
+    );
 
     return NextResponse.json({
       connected: true,

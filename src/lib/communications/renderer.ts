@@ -29,6 +29,7 @@ import { resolveEmailLocation } from '@/lib/emails/booking-location';
 import { accountBookingsMagicLinkUrl, accountBookingsPortalUrl } from '@/lib/emails/account-portal-links';
 import { formatCardHoldFeePence } from '@/lib/booking/card-hold-terms';
 import { buildReviewRequestBlock } from '@/lib/emails/review-request-block';
+import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 import {
   bookingConfirmationSmsPriceSuffix,
   cardHoldConfirmationNotice,
@@ -114,6 +115,16 @@ function accountBookingsLinkParts(
 }
 
 /** "Forms to complete before your visit" block (compliance auto-send, Phase 1). */
+/** UX spec `email.confirm.through`: the collective page the booking came through, when it did. */
+function bookedThroughLine(collective: string | null | undefined): string | null {
+  return collective?.trim() ? collectiveCopy('email.confirm.through', { collective: collective.trim() }) : null;
+}
+
+function bookedThroughHtml(collective: string | null | undefined): string {
+  const line = bookedThroughLine(collective);
+  return line ? `<p style="margin:0 0 8px 0;font-size:14px;line-height:1.55;color:#334155">${escapeHtml(line)}</p>` : '';
+}
+
 function complianceFormsHtml(
   forms?: Array<{ name: string; url: string }>,
   brandColour?: string | null,
@@ -997,7 +1008,9 @@ export function renderCommunicationEmail(
       priceDisplay: structuredPrice?.trim() ? structuredPrice : null,
       manageButtonLabel: manageBookingActionButtonLabel(cancelOnly),
       blocks: {
-        preambleHtml: complianceFormsHtml(opts.booking.compliance_forms, opts.venue.brand_colour),
+        preambleHtml:
+          bookedThroughHtml(opts.booking.booked_through) +
+          complianceFormsHtml(opts.booking.compliance_forms, opts.venue.brand_colour),
         depositHtml: holdNoticeHtml,
         customMessage: opts.emailCustomMessage ?? null,
         postCtaAccountHtml: config.postCtaHtml ?? null,
@@ -1081,8 +1094,11 @@ export function renderCommunicationEmail(
         : []
       : resolvedLocation.textLines;
 
+  const throughLine =
+    opts.messageKey === 'booking_confirmation' ? bookedThroughLine(opts.booking.booked_through) : null;
   const text = buildTextLines([
     ...config.textLines,
+    throughLine,
     opts.emailCustomMessage ? '' : null,
     opts.emailCustomMessage ?? null,
     opts.messageKey === 'booking_confirmation' || locationTextLines.length > 0 ? '' : null,

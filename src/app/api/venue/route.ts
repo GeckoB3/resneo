@@ -15,6 +15,11 @@ import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
 import { backfillVenueEmailIfEmptyFromStaff } from '@/lib/venue-contact-email';
 import { assertCanDisableBookingModels } from '@/lib/booking/venue-booking-model-disable-guard';
 import {
+  bookingModelLockRefusal,
+  findCollectiveLockForVenue,
+  timezoneLockRefusal,
+} from '@/lib/linked-accounts/collective-venue-locks';
+import {
   parseVenueFeatureFlags,
   resolveAppointmentsFeatureFlags,
   resolvedAppointmentsFeatureFlagsForApi,
@@ -245,6 +250,22 @@ export async function PATCH(request: NextRequest) {
 
     const data = parsed.data as Record<string, unknown>;
     const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
+
+    // A venue in a collective shares its timezone and needs appointments (W7; TERMS-15, BM-02).
+    // Profile autosave sends the timezone every time, so only a real change is refused.
+    const touchesLockedSettings =
+      data.timezone !== undefined || data.active_booking_models !== undefined || data.enabled_models !== undefined;
+    const collectiveLock = touchesLockedSettings ? await findCollectiveLockForVenue(staff.db, staff.venue_id) : null;
+    if (collectiveLock && data.timezone !== undefined) {
+      const { data: current } = await staff.db.from('venues').select('timezone').eq('id', staff.venue_id).maybeSingle();
+      const refused = timezoneLockRefusal(
+        collectiveLock,
+        (current as { timezone?: string | null } | null)?.timezone,
+        data.timezone as string,
+      );
+      if (refused) return refused;
+    }
+
     if (data.name !== undefined) update.name = data.name;
     if (data.slug !== undefined) update.slug = data.slug;
     if (data.address !== undefined) update.address = data.address;
@@ -378,7 +399,7 @@ export async function PATCH(request: NextRequest) {
     if (data.active_booking_models !== undefined || data.enabled_models !== undefined) {
       const { data: venueRow, error: primaryErr } = await staff.db
         .from('venues')
-        .select('booking_model, enabled_models, active_booking_models, pricing_tier, timezone')
+        .select('name, booking_model, enabled_models, active_booking_models, pricing_tier, timezone')
         .eq('id', staff.venue_id)
         .single();
       if (primaryErr || !venueRow) {
@@ -386,6 +407,7 @@ export async function PATCH(request: NextRequest) {
         return NextResponse.json({ error: 'Failed to validate venue' }, { status: 500 });
       }
       const row = venueRow as {
+        name?: string | null;
         booking_model?: BookingModel;
         enabled_models?: unknown;
         active_booking_models?: unknown;
@@ -429,6 +451,8 @@ export async function PATCH(request: NextRequest) {
           return NextResponse.json({ error: 'At least one booking model must remain active.' }, { status: 400 });
         }
         const removed = existingActive.filter((m) => !nextActiveModels!.includes(m));
+        const locked = bookingModelLockRefusal(collectiveLock, row.name ?? 'Your venue', removed);
+        if (locked) return locked;
         try {
           await assertCanDisableBookingModels(staff.db, staff.venue_id, row.timezone, removed);
         } catch (guardErr) {

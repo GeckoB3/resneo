@@ -4,6 +4,9 @@ import {
 } from '@/lib/availability/appointment-engine';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { isParked, loadBookableServiceIds } from '@/lib/linked-accounts/replicas/parking';
+import { loadStaffOnlyServiceIds } from '@/lib/booking/staff-only-services';
+import type { RpcClient } from '@/lib/linked-accounts/replicas/crons';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import {
   isUnifiedSchedulingVenue,
@@ -147,6 +150,26 @@ async function handleAppointmentCalendarGet(request: NextRequest) {
       return NextResponse.json(
         { error: 'This venue does not offer appointment bookings' },
         { status: 403 },
+      );
+    }
+
+    // D2 and "staff bookings only": neither offers a guest any dates.
+    const [bookableIds, staffOnlyIds] = await Promise.all([
+      loadBookableServiceIds(supabase as unknown as RpcClient, venueId),
+      loadStaffOnlyServiceIds(supabase, [serviceId]),
+    ]);
+    if (isParked(bookableIds, serviceId) || staffOnlyIds.has(serviceId)) {
+      return NextResponse.json(
+        {
+          venue_id: venueId,
+          practitioner_id: anyAvailable ? ANY_AVAILABLE_PRACTITIONER_ID : practitionerId,
+          service_id: serviceId,
+          year,
+          month,
+          available_dates: [],
+          any_available: anyAvailable || undefined,
+        },
+        { headers: { 'Cache-Control': 'no-store' } },
       );
     }
 

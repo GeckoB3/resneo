@@ -105,6 +105,8 @@ export interface BookingDetail {
    * "Price not set" and nothing else, even on a booking paid in the app.
    */
   service_variant_price_pence?: number | null;
+  /** The service line's price when booked (20270212120000). */
+  service_price_snapshot_pence?: number | null;
   booking_total_price_pence?: number | null;
   amount_paid_pence?: number | null;
   payment_state?: BookingPaymentState | null;

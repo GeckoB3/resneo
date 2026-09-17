@@ -6,6 +6,8 @@ export interface DashboardEntityRowActionsProps {
   onEdit: () => void;
   onDelete: () => void;
   showDelete?: boolean;
+  /** "View" where the row can be opened but not changed (a service another venue manages). */
+  editLabel?: string;
   /** Use inside clickable parents (e.g. selectable cards). */
   stopPropagation?: boolean;
   className?: string;
@@ -16,6 +18,7 @@ export function DashboardEntityRowActions({
   onEdit,
   onDelete,
   showDelete = true,
+  editLabel = 'Edit',
   stopPropagation = false,
   className = '',
 }: DashboardEntityRowActionsProps) {
@@ -33,7 +36,7 @@ export function DashboardEntityRowActions({
         onClick={wrap(onEdit)}
         className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium leading-4 text-slate-700 hover:bg-slate-50"
       >
-        Edit
+        {editLabel}
       </button>
       {showDelete ? (
         <button

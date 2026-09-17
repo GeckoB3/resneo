@@ -21,6 +21,8 @@ import {
 } from '@/lib/linked-accounts/collective-venue';
 import { readableAccentForWhiteText } from '@/lib/linked-accounts/branding-contrast';
 import { BookPublicLayout } from '@/components/booking/BookPublicLayout';
+import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
+import { loadDissolvedPage, type DissolvedPageView } from '@/lib/linked-accounts/replicas/dissolved-page';
 
 export function accentFromBranding(branding: CollectiveBranding): string {
   return readableAccentForWhiteText(branding.primary_colour, '#003B6F');
@@ -28,6 +30,7 @@ export function accentFromBranding(branding: CollectiveBranding): string {
 
 export type CollectivePageView =
   | { status: 'notfound' }
+  | { status: 'dissolved'; page: DissolvedPageView }
   | { status: 'unavailable'; name: string; branding: CollectiveBranding }
   | {
       status: 'live';
@@ -50,6 +53,11 @@ export async function loadCollectivePageView(
   if (!collective) {
     const known = await loadCollectiveBrandingBySlug(admin, slug);
     if (!known) return { status: 'notfound' };
+    if (known.status === 'dissolved') {
+      // D25: a neutral page for 90 days, listing the venues that were part of it.
+      const page = await loadDissolvedPage(admin, slug);
+      return page ? { status: 'dissolved', page } : { status: 'notfound' };
+    }
     return { status: 'unavailable', name: known.name, branding: known.branding };
   }
 
@@ -101,6 +109,53 @@ export function CollectiveUnavailable({
         <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
           It may be being set up or paused. Please check back soon, or contact the venue directly.
         </p>
+      </main>
+    </div>
+  );
+}
+
+/**
+ * D25: the old address of an ended collective. Neither a 404 nor a redirect to the host: each venue
+ * that was part of it, unless it opted out, with a link to its own booking page.
+ */
+export function DissolvedCollectivePage({ page }: { page: DissolvedPageView }) {
+  const accent = accentFromBranding(page.branding);
+  return (
+    <div className="min-h-[100dvh] bg-slate-50">
+      <header className="px-4 py-10 text-white sm:py-14" style={{ backgroundColor: accent }}>
+        <div className="mx-auto flex max-w-3xl flex-col items-center gap-3 text-center">
+          <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">
+            {collectiveCopy('public.dissolved.title', { collective: page.name })}
+          </h1>
+        </div>
+      </header>
+      <main className="mx-auto max-w-xl space-y-6 px-4 py-10 text-center">
+        {page.venues.length > 0 ? (
+          <>
+            <p className="text-base font-medium text-slate-900">{collectiveCopy('public.dissolved.body')}</p>
+            <ul className="space-y-3">
+              {page.venues.map((venue) => (
+                <li key={`${venue.name}-${venue.slug ?? ''}`} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                  <p className="font-semibold text-slate-900">{venue.name}</p>
+                  {venue.slug ? (
+                    <a
+                      href={`/book/${venue.slug}`}
+                      className="mt-2 inline-flex rounded-lg px-4 py-2 text-sm font-semibold text-white"
+                      style={{ backgroundColor: accent }}
+                    >
+                      {collectiveCopy('public.dissolved.book', { venue: venue.name })}
+                    </a>
+                  ) : (
+                    <p className="mt-1 text-sm text-slate-600">{collectiveCopy('public.dissolved.none')}</p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          <p className="text-base text-slate-700">{collectiveCopy('public.dissolved.none')}</p>
+        )}
+        <p className="text-sm text-slate-500">{collectiveCopy('public.dissolved.existing')}</p>
       </main>
     </div>
   );

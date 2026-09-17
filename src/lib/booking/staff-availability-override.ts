@@ -23,7 +23,9 @@ import { getVenueStaff, type VenueStaff } from '@/lib/venue-auth';
 import { resolveStaffCollectiveScope } from '@/lib/linked-accounts/collective-staff-scope';
 import { resolveLinkedStaffCreateScope } from '@/lib/booking/staff-booking-access';
 import {
+  resolveCollectiveBookingTarget,
   resolveCombinedBookingTarget,
+  type CollectiveTargetResult,
   type CombinedBookingTarget,
 } from '@/lib/linked-accounts/collective-booking-bridge';
 import { loadCollectiveAppointmentCatalog } from '@/lib/linked-accounts/collective-venue';
@@ -37,7 +39,8 @@ import { formatYmdInTimezone } from '@/lib/venue/venue-local-clock';
 import type { ProcessingTimeBlock } from '@/types/booking-models';
 
 export type StaffOverrideActor =
-  | { ok: true; staff: VenueStaff; via: 'own' | 'collective' | 'linked' }
+  /** `userId` is the signed-in user behind the staff row, for the cross-venue audit trail. */
+  | { ok: true; staff: VenueStaff; via: 'own' | 'collective' | 'linked'; userId: string | null }
   | { ok: false; status: 401 | 403; error: string };
 
 /**
@@ -48,6 +51,34 @@ export async function resolveStaffOverrideActor(
   admin: SupabaseClient,
   request: NextRequest,
   target: { venueId: string; collectiveId?: string | null },
+): Promise<StaffOverrideActor> {
+  return resolveStaffBookingActor(admin, request, target, {
+    signedOut: 'Override availability is for signed-in staff only.',
+    forbidden: 'You cannot override availability for that venue.',
+  });
+}
+
+export const STAFF_SOURCE_SIGNED_OUT_ERROR = 'Phone and walk-in bookings are for signed-in staff only.';
+export const STAFF_SOURCE_FORBIDDEN_ERROR = 'You cannot take bookings for that venue.';
+
+/**
+ * The signed-in staff member behind a staff-source (`phone` / `walk-in`) booking on the
+ * public visit and group create routes, and whether they may book at `venueId`: their own
+ * venue, a member of the collective the booking is routed through, or a venue they hold
+ * create access to through an account link.
+ *
+ * CB-23: those routes are anonymous, and a staff source waives the deposit and turns
+ * compliance into warnings. Without this check anyone could post `source: 'phone'` and
+ * book a paid service for nothing. CB-26: the answer is also what stamps the actor.
+ */
+export async function resolveStaffBookingActor(
+  admin: SupabaseClient,
+  request: NextRequest,
+  target: { venueId: string; collectiveId?: string | null },
+  messages: { signedOut: string; forbidden: string } = {
+    signedOut: STAFF_SOURCE_SIGNED_OUT_ERROR,
+    forbidden: STAFF_SOURCE_FORBIDDEN_ERROR,
+  },
 ): Promise<StaffOverrideActor> {
   let staff: VenueStaff | null = null;
   let userId: string | null = null;
@@ -62,18 +93,18 @@ export async function resolveStaffOverrideActor(
     staff = null;
   }
   if (!staff) {
-    return { ok: false, status: 401, error: 'Override availability is for signed-in staff only.' };
+    return { ok: false, status: 401, error: messages.signedOut };
   }
-  if (staff.venue_id === target.venueId) return { ok: true, staff, via: 'own' };
+  if (staff.venue_id === target.venueId) return { ok: true, staff, via: 'own', userId };
   if (target.collectiveId) {
     const scope = await resolveStaffCollectiveScope(admin, staff.venue_id, target.collectiveId);
     if (scope && scope.memberVenueIds.includes(target.venueId)) {
-      return { ok: true, staff, via: 'collective' };
+      return { ok: true, staff, via: 'collective', userId };
     }
   }
   const linked = await resolveLinkedStaffCreateScope(admin, staff.venue_id, target.venueId, userId);
-  if (linked.ok) return { ok: true, staff, via: 'linked' };
-  return { ok: false, status: 403, error: 'You cannot override availability for that venue.' };
+  if (linked.ok) return { ok: true, staff, via: 'linked', userId };
+  return { ok: false, status: 403, error: messages.forbidden };
 }
 
 /**
@@ -101,6 +132,24 @@ export async function resolveOverrideCollectiveTarget(
     pricePence: service.price_pence,
     durationMinutes: service.duration_minutes,
   };
+}
+
+/**
+ * The target a request books on the collective, for its audience: the page's rules for guests and
+ * staff (a venue still catching up is refused either way, D33), and for the staff override any copy
+ * at the calendar's venue as well. Pass `staff` only once the caller is known to be staff.
+ */
+export async function resolveCollectiveTargetForRequest(
+  admin: SupabaseClient,
+  params: { collectiveId: string; offeringId: string; calendarId: string },
+  mode: 'public' | 'staff' | 'override',
+): Promise<CollectiveTargetResult> {
+  const result = await resolveCollectiveBookingTarget(admin, params, mode === 'public' ? 'public' : 'staff');
+  if (result.ok || result.code || mode !== 'override') return result;
+  const target = await resolveOverrideCollectiveTarget(admin, params);
+  return target
+    ? { ok: true, target }
+    : { ok: false, code: null, error: 'That venue has no copy of this service, so it cannot be booked there.' };
 }
 
 /** The one date rule the override keeps: nothing is booked into the past. */

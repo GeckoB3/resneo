@@ -281,6 +281,7 @@ export interface BookingDetailLite {
    * settles every booking sharing a group_booking_id.
    */
   service_variant_price_pence?: number | null;
+  service_price_snapshot_pence?: number | null;
   booking_total_price_pence?: number | null;
   amount_paid_pence?: number | null;
   payment_state?: BookingPaymentState | null;
@@ -1281,7 +1282,8 @@ export function ExpandedBookingContent({
   // its add-ons. Both are snapshots on the booking, so the row and the total below
   // it always agree rather than one of them following the catalogue's live price.
   const singleServicePence = (() => {
-    const variant = paymentDisplayBooking.service_variant_price_pence ?? null;
+    const variant =
+      paymentDisplayBooking.service_price_snapshot_pence ?? paymentDisplayBooking.service_variant_price_pence ?? null;
     if (variant != null) return variant;
     const total = paymentDisplayBooking.booking_total_price_pence ?? null;
     if (total == null) return null;
@@ -1301,7 +1303,7 @@ export function ExpandedBookingContent({
     const stored = paymentDisplayBooking.booking_total_price_pence;
     if (stored != null && stored > 0) return stored;
     const computed =
-      (paymentDisplayBooking.service_variant_price_pence ?? 0) +
+      (paymentDisplayBooking.service_price_snapshot_pence ?? paymentDisplayBooking.service_variant_price_pence ?? 0) +
       (paymentDisplayBooking.addons_total_price_pence ?? 0);
     return computed > 0 ? computed : null;
   })();

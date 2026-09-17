@@ -21,7 +21,32 @@ import {
   type ServiceGrouping,
 } from './collectives';
 import { evaluateLinkEligibility } from './eligibility';
+import { currencyMismatchWords, normalCurrency } from './collective-currency';
+import { fetchServiceCategoryRefs } from '@/lib/booking/service-categories-db';
+import {
+  buildDerivedCatalogueItems,
+  type DerivedLink,
+  type DerivedVenue,
+  type ProviderExclusion,
+} from './replicas/derived-catalogue';
+import { resolveAppointmentsFeatureFlag, parseVenueFeatureFlags } from '@/lib/feature-flags/resolve';
 import { fetchAppointmentCatalog } from '@/lib/availability/appointment-catalog';
+import type { ProcessingTimeBlock } from '@/types/booking-models';
+
+/** One calendar's own terms for one service: its own values where it has them, else the service's. */
+export interface CalendarServiceTerms {
+  durationMinutes: number | null;
+  pricePence: number | null;
+  bufferMinutes: number;
+  depositPence: number | null;
+  /** The processing pattern fitted to this calendar's length. */
+  processingBlocks: ProcessingTimeBlock[];
+}
+
+/** Key for `VenueCatalogueData.calendarServiceTerms`. */
+export function calendarServiceTermsKey(calendarId: string, serviceId: string): string {
+  return `${calendarId}:${serviceId}`;
+}
 
 /**
  * A venue's bookable catalogue, resolved MODEL-AGNOSTICALLY (plan §16 follow-up).
@@ -34,7 +59,11 @@ import { fetchAppointmentCatalog } from '@/lib/availability/appointment-catalog'
  * expects (it maps them per model).
  */
 export interface VenueCatalogueData {
-  /** serviceId → name/duration/price/description (deduped across calendars). */
+  /**
+   * serviceId → name/duration/price/description (deduped across calendars). Price and length
+   * here are a SUMMARY for labels: the lowest price and the shortest length any calendar
+   * offers it at. Never charge or reserve from them; use `calendarServiceTerms` (CB-01).
+   */
   services: Map<
     string,
     {
@@ -53,6 +82,11 @@ export interface VenueCatalogueData {
   calendars: Map<string, { name: string }>;
   /** serviceId → calendarIds that offer it (for the availability fan-out). */
   serviceCalendars: Map<string, string[]>;
+  /**
+   * `calendarId:serviceId` → that calendar's own terms. A calendar's custom price and length
+   * belong to that calendar only; the page used to apply the first calendar's to all of them.
+   */
+  calendarServiceTerms: Map<string, CalendarServiceTerms>;
   /** ordered list of services for the builder. */
   serviceList: {
     id: string;
@@ -64,6 +98,12 @@ export interface VenueCatalogueData {
   }[];
   /** ordered list of calendars for the builder. */
   calendarList: { id: string; name: string }[];
+}
+
+function lowerOf(a: number | null, b: number | null): number | null {
+  if (a == null) return b;
+  if (b == null) return a;
+  return Math.min(a, b);
 }
 
 export async function loadVenueCatalogueData(
@@ -78,6 +118,10 @@ export async function loadVenueCatalogueData(
     // service into that venue. Guest booking keeps its own (filtered) catalog.
     ({ practitioners } = await fetchAppointmentCatalog(admin, venueId, {
       includeCalendarsWithoutServices: true,
+      includeParked: true,
+      // Both the combined-page builder and the collective builds need every service; the public
+      // combined page drops staff-only ones per provider (buildDerivedCatalogueItems).
+      audience: 'staff',
     }));
   } catch {
     practitioners = [];
@@ -95,6 +139,7 @@ export async function loadVenueCatalogueData(
   >();
   const calendars = new Map<string, { name: string }>();
   const serviceCalendars = new Map<string, string[]>();
+  const calendarServiceTerms = new Map<string, CalendarServiceTerms>();
   const serviceOrder: string[] = [];
   const calendarOrder: string[] = [];
   for (const p of practitioners) {
@@ -103,7 +148,16 @@ export async function loadVenueCatalogueData(
       calendarOrder.push(p.id);
     }
     for (const s of p.services) {
-      if (!services.has(s.id)) {
+      // `p.services` is already merged with THIS calendar's assignment.
+      calendarServiceTerms.set(calendarServiceTermsKey(p.id, s.id), {
+        durationMinutes: s.duration_minutes ?? null,
+        pricePence: s.price_pence ?? null,
+        bufferMinutes: s.buffer_minutes ?? 0,
+        depositPence: s.deposit_pence ?? null,
+        processingBlocks: s.processing_time_blocks ?? [],
+      });
+      const existing = services.get(s.id);
+      if (!existing) {
         services.set(s.id, {
           name: s.name,
           durationMinutes: s.duration_minutes ?? null,
@@ -113,6 +167,9 @@ export async function loadVenueCatalogueData(
           category: s.category ?? null,
         });
         serviceOrder.push(s.id);
+      } else {
+        existing.durationMinutes = lowerOf(existing.durationMinutes, s.duration_minutes ?? null);
+        existing.pricePence = lowerOf(existing.pricePence, s.price_pence ?? null);
       }
       const cals = serviceCalendars.get(s.id) ?? [];
       if (!cals.includes(p.id)) cals.push(p.id);
@@ -123,6 +180,7 @@ export async function loadVenueCatalogueData(
     services,
     calendars,
     serviceCalendars,
+    calendarServiceTerms,
     serviceList: serviceOrder.map((id) => ({ id, ...services.get(id)! })),
     calendarList: calendarOrder.map((id) => ({ id, name: calendars.get(id)!.name })),
   };
@@ -159,6 +217,8 @@ export function normaliseServiceNameForMerge(name: string): string {
 export interface CombinedEligibilityResult {
   ok: boolean;
   reason: string | null;
+  /** Set when the refusal has its own code (a currency mismatch answers 409, BM-04). */
+  code?: 'COLLECTIVE_CURRENCY_MISMATCH';
   /** The single shared timezone, when all members agree (else null). */
   timezone: string | null;
 }
@@ -167,11 +227,16 @@ export interface CombinedEligibilityResult {
  * Whether a set of member venues may run a combined (unified_catalog) page:
  * every pair must hold full mutual create/edit/cancel access (plan D4, via
  * {@link hasFullMutualWriteLinks}) and all members must share one timezone
- * (plan D8). Used to gate upgrade and to validate it stays satisfiable.
+ * (plan D8) and one currency (graft 4: the page shows the host's currency, so a member trading in
+ * another would have its prices relabelled rather than converted). Used to gate upgrade and to
+ * validate it stays satisfiable.
+ *
+ * `hostVenueId` names whose currency is the collective's; without it the first venue's is.
  */
 export async function checkCombinedEligibility(
   admin: SupabaseClient,
   memberVenueIds: string[],
+  options: { hostVenueId?: string } = {},
 ): Promise<CombinedEligibilityResult> {
   const ids = [...new Set(memberVenueIds.filter(Boolean))];
   if (ids.length < 2) {
@@ -188,13 +253,25 @@ export async function checkCombinedEligibility(
       };
     }
   }
-  const { data: venues } = await admin.from('venues').select('id, timezone').in('id', ids);
+  const { data: venues } = await admin.from('venues').select('id, name, timezone, currency').in('id', ids);
   const tzs = new Set((venues ?? []).map((v) => ((v.timezone as string | null) ?? 'Europe/London')));
   if (tzs.size > 1) {
     return {
       ok: false,
       reason: 'All members must share the same timezone to run a combined page.',
       timezone: null,
+    };
+  }
+  const hostId = options.hostVenueId ?? ids[0];
+  const host = (venues ?? []).find((v) => v.id === hostId);
+  const hostCurrency = normalCurrency(host?.currency as string | null | undefined);
+  const odd = (venues ?? []).find((v) => normalCurrency(v.currency as string | null | undefined) !== hostCurrency);
+  if (odd) {
+    return {
+      ok: false,
+      reason: currencyMismatchWords((odd.name as string | null) ?? 'A venue', odd.currency as string | null, hostCurrency),
+      timezone: null,
+      code: 'COLLECTIVE_CURRENCY_MISMATCH',
     };
   }
   return { ok: true, reason: null, timezone: [...tzs][0] ?? null };
@@ -372,6 +449,14 @@ export async function loadCatalogueForManagement(
     .eq('id', collectiveId)
     .maybeSingle();
   if (!collective) return null;
+  // On the shared-services model every copy follows its master, so the older manager's sync states
+  // do not apply (MGR-01): read apart, like every other reader of the engine's columns.
+  const { data: modelRow } = await admin
+    .from('venue_collectives')
+    .select('service_model')
+    .eq('id', collectiveId)
+    .maybeSingle();
+  const followsEngine = (modelRow?.service_model as string | undefined) === 'replicas';
 
   const { data: memberRows } = await admin
     .from('venue_collective_members')
@@ -396,8 +481,10 @@ export async function loadCatalogueForManagement(
   const memberSources: CatalogueMemberSource[] = [];
   const serviceIndex = new Map<string, SourceServiceRecord>(); // `${venueId}:${serviceId}`
   const practitionerNameById = new Map<string, string>(); // `${venueId}:${calendarId}`
+  const termsByVenue = new Map<string, VenueCatalogueData['calendarServiceTerms']>();
   for (const venueId of memberVenueIds) {
     const data = await loadVenueCatalogueData(admin, venueId);
+    termsByVenue.set(venueId, data.calendarServiceTerms);
     for (const s of data.serviceList) {
       serviceIndex.set(`${venueId}:${s.id}`, {
         name: s.name,
@@ -490,6 +577,10 @@ export async function loadCatalogueForManagement(
       const sourceServiceId = raw.source_service_id as string;
       const source = serviceIndex.get(`${venueId}:${sourceServiceId}`);
       const practitionerId = (raw.practitioner_id as string | null) ?? null;
+      // A calendar-pinned provider shows that calendar's own price and length (CB-01).
+      const pinnedTerms = practitionerId
+        ? termsByVenue.get(venueId)?.get(calendarServiceTermsKey(practitionerId, sourceServiceId)) ?? null
+        : null;
       const view: CatalogueProviderView = {
         id: raw.id as string,
         itemId,
@@ -503,8 +594,8 @@ export async function loadCatalogueForManagement(
           : null,
         // Each venue owns its service's price/duration (set on /dashboard/appointment-services);
         // the combined page never overrides them — it just maps service names → calendars.
-        effectivePricePence: source?.pricePence ?? null,
-        effectiveDurationMinutes: source?.durationMinutes ?? null,
+        effectivePricePence: pinnedTerms ? pinnedTerms.pricePence : source?.pricePence ?? null,
+        effectiveDurationMinutes: pinnedTerms ? pinnedTerms.durationMinutes : source?.durationMinutes ?? null,
         status: raw.status as ProviderStatus,
         // Source live = service still active, and (if pinned) practitioner still active.
         sourceLive:
@@ -512,7 +603,7 @@ export async function loadCatalogueForManagement(
           (practitionerId ? practitionerNameById.has(`${venueId}:${practitionerId}`) : true),
         sync: (() => {
           const v = syncViews.get(sourceServiceId);
-          if (!v) return { state: 'none' as const, originVenueName: null, inStep: null };
+          if (!v || followsEngine) return { state: 'none' as const, originVenueName: null, inStep: null };
           // A venue's own service is an "independent copy" only when it stands in for the
           // offering at a venue other than the origin's, which is where "Link to {origin}
           // and update" applies; at the origin it is the original.
@@ -633,14 +724,16 @@ export async function resolveCombinedSlugClaim(
     .eq('status', 'active')
     .eq('solo_page_behavior', 'redirect');
   for (const m of memberRows ?? []) {
+    // `select('*')`: `service_model` must not break the page on a database without the engine.
     const { data: col } = await admin
       .from('venue_collectives')
-      .select('slug, adopted_venue_id')
+      .select('*')
       .eq('id', m.collective_id as string)
       .eq('status', 'active')
       .eq('page_mode', 'unified_catalog')
       .maybeSingle();
-    if (!col) continue;
+    // A shared-services collective ignores the stored choice: its rule is derived (page-handover.ts).
+    if (!col || (col as { service_model?: string }).service_model === 'replicas') continue;
     let redirectTo = `/book/c/${col.slug as string}`;
     if (col.adopted_venue_id) {
       const { data: adoptedVenue } = await admin
@@ -697,6 +790,11 @@ export interface PublicCombinedCatalogue {
    */
   venueData: Record<string, VenueCatalogueData>;
   hostVenueId: string | null;
+  /**
+   * Replicas model only: the calendars a guest may not book right now, per offering, with the
+   * reason. The staff build lists them with a note; the public page never sees them (§6.6).
+   */
+  excludedByItem?: Record<string, { provider: PublicCatalogueProvider; reason: ProviderExclusion }[]>;
 }
 
 /**
@@ -763,9 +861,11 @@ async function loadPublicCombinedCatalogueUncached(
   admin: SupabaseClient,
   collectiveId: string,
 ): Promise<PublicCombinedCatalogue | null> {
+  // `select('*')`: the replicas-model columns (service_model, paused_at) must not break the page on a
+  // database that has not had 20270215120000 yet.
   const { data: collective } = await admin
     .from('venue_collectives')
-    .select('id, status, page_mode, service_grouping, host_venue_id')
+    .select('*')
     .eq('id', collectiveId)
     .maybeSingle();
   if (!collective || collective.status !== 'active' || collective.page_mode !== 'unified_catalog') {
@@ -774,7 +874,7 @@ async function loadPublicCombinedCatalogueUncached(
 
   const { data: memberRows } = await admin
     .from('venue_collective_members')
-    .select('venue_id')
+    .select('*')
     .eq('collective_id', collectiveId)
     .eq('status', 'active');
   const memberVenueIds = (memberRows ?? []).map((m) => m.venue_id as string);
@@ -784,7 +884,7 @@ async function loadPublicCombinedCatalogueUncached(
   const { data: venues } = await admin
     .from('venues')
     .select(
-      'id, name, slug, pricing_tier, plan_status, booking_model, subscription_current_period_end, billing_access_source',
+      'id, name, slug, pricing_tier, plan_status, booking_model, subscription_current_period_end, billing_access_source, feature_flags, stripe_charges_enabled',
     )
     .in('id', memberVenueIds);
   const venueInfo: Record<string, { name: string; slug: string; eligible: boolean }> = {};
@@ -859,6 +959,39 @@ async function loadPublicCombinedCatalogueUncached(
   const categories = await fetchCollectiveCategoryRefs(admin, collectiveId);
   const categoryById = new Map(categories.map((c) => [c.id, c]));
 
+  // A replicas-model collective's page is derived from its masters and converged replicas (§6.6).
+  if ((collective as { service_model?: string }).service_model === 'replicas') {
+    const hostVenueId = (collective.host_venue_id as string | null) ?? '';
+    const paused = Boolean((collective as { paused_at?: string | null }).paused_at);
+    const derivedItems = paused
+      ? []
+      : await loadDerivedCatalogueItems(admin, {
+          collectiveId,
+          hostVenueId,
+          items,
+          memberRows: (memberRows ?? []) as Array<Record<string, unknown>>,
+          venues: (venues ?? []) as Array<Record<string, unknown>>,
+          venueInfo,
+          venueData,
+        });
+    const ordered = derivedItems
+      .filter((item) => item.providers.length > 0)
+      .sort((a, b) =>
+        compareCombinedCatalogueItems({ name: a.name, ...a.sortKey }, { name: b.name, ...b.sortKey }),
+      );
+    return {
+      serviceGrouping: collective.service_grouping as ServiceGrouping,
+      items: ordered.map(({ excluded: _excluded, sortKey: _sortKey, ...item }) => item),
+      excludedByItem: Object.fromEntries(
+        derivedItems.filter((i) => i.excluded.length > 0).map((i) => [i.id, i.excluded]),
+      ),
+      // Headings follow the host's services on the replicas model, not the collective's own list.
+      categories: hostVenueId ? await fetchServiceCategoryRefs(admin, hostVenueId) : [],
+      venueData,
+      hostVenueId: hostVenueId || null,
+    };
+  }
+
   const providersByItem = new Map<string, PublicCatalogueProvider[]>();
   // itemId → lowest source-service sort_order across bookable providers. Lets the
   // combined page follow the member venues' own service order (Dashboard → Services)
@@ -887,6 +1020,9 @@ async function loadPublicCombinedCatalogueUncached(
         if (!pr) continue; // pinned calendar inactive/removed → not bookable
         practName = pr.name;
       }
+      const pinnedTerms = practitionerId
+        ? venueData[venueId]!.calendarServiceTerms.get(calendarServiceTermsKey(practitionerId, sourceServiceId)) ?? null
+        : null;
       const itemId = raw.item_id as string;
       const prevMin = minSourceSortByItem.get(itemId);
       if (prevMin === undefined || source.sortOrder < prevMin) {
@@ -900,10 +1036,12 @@ async function loadPublicCombinedCatalogueUncached(
         practitionerId,
         practitionerName: practName,
         sourceServiceId,
-        // Price/duration are the owning venue's own service settings — never a
-        // collective-level override. "from" price = the lowest of these across calendars.
-        pricePence: source.pricePence,
-        durationMinutes: source.durationMinutes,
+        // The owning venue's own terms, never a collective-level override. A provider pinned
+        // to one calendar carries that calendar's price and length; a venue-wide one carries
+        // the lowest across its calendars, for the "from" price. Each calendar's own terms
+        // are applied per calendar when the page is built (collective-venue.ts).
+        pricePence: pinnedTerms ? pinnedTerms.pricePence : source.pricePence,
+        durationMinutes: pinnedTerms ? pinnedTerms.durationMinutes : source.durationMinutes,
       };
       const list = providersByItem.get(itemId) ?? [];
       list.push(view);
@@ -959,4 +1097,101 @@ async function loadPublicCombinedCatalogueUncached(
     venueData,
     hostVenueId: (collective.host_venue_id as string | null) ?? null,
   };
+}
+
+/**
+ * Reads what `buildDerivedCatalogueItems` decides from, for a replicas-model collective: live replica
+ * links, each member's suspension, each venue's card-charge readiness and forms setting, and which
+ * services take payment or need a form.
+ */
+async function loadDerivedCatalogueItems(
+  admin: SupabaseClient,
+  ctx: {
+    collectiveId: string;
+    hostVenueId: string;
+    items: Array<Record<string, unknown>>;
+    memberRows: Array<Record<string, unknown>>;
+    venues: Array<Record<string, unknown>>;
+    venueInfo: Record<string, { name: string; slug: string; eligible: boolean }>;
+    venueData: Record<string, VenueCatalogueData>;
+  },
+) {
+  const offerings = ctx.items
+    .filter((i) => typeof i.master_service_id === 'string')
+    .map((i) => ({
+      id: i.id as string,
+      masterServiceId: i.master_service_id as string,
+      displayOrder: (i.display_order as number | null) ?? 0,
+      imageUrl: (i.image_url as string | null) ?? null,
+      pricingDisplay: ((i.pricing_display as PricingDisplay | null) ?? 'from') as PricingDisplay,
+      allowAnyAvailable: (i.allow_any_available as boolean | null) ?? true,
+    }));
+  if (offerings.length === 0) return [];
+
+  const { data: linkRows, error: linkErr } = await admin
+    .from('collective_service_replicas')
+    .select('collective_service_item_id, venue_id, replica_service_id, applied_revision, desired_revision')
+    .eq('collective_id', ctx.collectiveId)
+    .is('released_at', null);
+  if (linkErr) {
+    console.error('[catalogue] replica links read failed:', linkErr.message, { collectiveId: ctx.collectiveId });
+  }
+  const links: DerivedLink[] = (linkRows ?? []).map((l) => ({
+    itemId: l.collective_service_item_id as string,
+    venueId: l.venue_id as string,
+    replicaServiceId: (l.replica_service_id as string | null) ?? null,
+    current: Number(l.applied_revision) === Number(l.desired_revision),
+  }));
+
+  const suspended = new Set(
+    ctx.memberRows.filter((m) => m.suspended_at != null).map((m) => m.venue_id as string),
+  );
+  const venues: Record<string, DerivedVenue> = {};
+  for (const v of ctx.venues) {
+    const id = v.id as string;
+    const info = ctx.venueInfo[id];
+    if (!info) continue;
+    venues[id] = {
+      name: info.name,
+      slug: info.slug,
+      eligible: info.eligible,
+      suspended: suspended.has(id),
+      chargesEnabled: v.stripe_charges_enabled === true,
+      formsOn: resolveAppointmentsFeatureFlag('compliance_records_enabled', parseVenueFeatureFlags(v.feature_flags)),
+    };
+  }
+
+  const serviceIds = [
+    ...new Set([
+      ...offerings.map((o) => o.masterServiceId),
+      ...links.map((l) => l.replicaServiceId).filter((id): id is string => Boolean(id)),
+    ]),
+  ];
+  const venueIds = Object.keys(venues);
+  const [paymentRes, serviceFormsRes, venueFormsRes] = await Promise.all([
+    admin.from('service_items').select('id, payment_requirement, is_bookable_online').in('id', serviceIds),
+    admin.from('service_compliance_requirements').select('service_item_id').in('service_item_id', serviceIds),
+    admin.from('service_compliance_requirements').select('venue_id').eq('scope', 'venue').in('venue_id', venueIds),
+  ]);
+  for (const res of [paymentRes, serviceFormsRes, venueFormsRes]) {
+    if (res.error) console.error('[catalogue] derived catalogue read failed:', res.error.message, { collectiveId: ctx.collectiveId });
+  }
+
+  return buildDerivedCatalogueItems({
+    hostVenueId: ctx.hostVenueId,
+    offerings,
+    links,
+    venues,
+    venueData: ctx.venueData,
+    paidServiceIds: new Set(
+      (paymentRes.data ?? [])
+        .filter((r) => ((r.payment_requirement as string | null) ?? 'none') !== 'none')
+        .map((r) => r.id as string),
+    ),
+    serviceIdsWithForms: new Set((serviceFormsRes.data ?? []).map((r) => r.service_item_id as string)),
+    venueIdsWithVenueWideForms: new Set((venueFormsRes.data ?? []).map((r) => r.venue_id as string)),
+    staffOnlyServiceIds: new Set(
+      (paymentRes.data ?? []).filter((r) => r.is_bookable_online === false).map((r) => r.id as string),
+    ),
+  });
 }

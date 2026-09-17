@@ -147,3 +147,25 @@ describe('VenueProfileSection autosave validation', () => {
     );
   });
 });
+
+describe('VenueProfileSection in a collective', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('locks the timezone and says why (TERMS-15)', () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
+    render(<VenueProfileSection venue={venue} onUpdate={vi.fn()} isAdmin collectiveName="Northside" />);
+    const select = screen.getByLabelText('Timezone');
+    expect(select).toBeDisabled();
+    expect(select).toHaveAccessibleDescription(
+      'You cannot change your timezone while you are part of Northside, because every venue in it uses the same timezone.',
+    );
+  });
+
+  it('leaves the timezone editable otherwise', () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
+    render(<VenueProfileSection venue={venue} onUpdate={vi.fn()} isAdmin />);
+    expect(screen.getByLabelText('Timezone')).toBeEnabled();
+  });
+});

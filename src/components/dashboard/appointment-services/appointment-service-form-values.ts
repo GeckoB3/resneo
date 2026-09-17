@@ -63,6 +63,8 @@ export interface AppointmentServiceFormValues {
   payment_requirement: ClassPaymentRequirement;
   colour: string;
   is_active: boolean;
+  /** "Staff bookings only" when false: the team can book it, guests never see it (Appendix F). */
+  is_bookable_online: boolean;
   /** Category heading on the booking pages; null for none. Optional so onboarding drafts need not carry it. */
   category_id?: string | null;
   practitioner_ids: string[];
@@ -108,6 +110,7 @@ export const DEFAULT_APPOINTMENT_SERVICE_FORM_VALUES: AppointmentServiceFormValu
   payment_requirement: 'none',
   colour: '#3B82F6',
   is_active: true,
+  is_bookable_online: true,
   category_id: null,
   practitioner_ids: [],
   staffMay: { ...DEFAULT_STAFF_MAY_CUSTOMIZE },

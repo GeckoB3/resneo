@@ -1,9 +1,12 @@
+import { newCollectiveServiceModel } from '@/lib/platform/platform-settings';
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveLinkAdmin } from '@/lib/linked-accounts/route-helpers';
 import { createCollectiveSchema } from '@/lib/linked-accounts/validation';
 import { loadCollectiveViewsForVenue } from '@/lib/linked-accounts/collectives';
 import { checkCombinedEligibility } from '@/lib/linked-accounts/catalogue';
 import { notifyCollectiveInvitation } from '@/lib/linked-accounts/notifications';
+import { exclusivityRefusal, noAppointmentsRefusal } from '@/lib/linked-accounts/collective-venue-locks';
+import { releaseDissolvedAddress } from '@/lib/linked-accounts/replicas/dissolved-page';
 
 /** GET /api/venue/collectives — collectives this venue hosts or belongs to. */
 export async function GET() {
@@ -22,6 +25,17 @@ export async function GET() {
   }
 }
 
+/**
+ * Which step of the create wizard a refusal belongs to (UI-C-01), so the wizard shows it there:
+ * `name` and `slug` on step 1, `venues` on step 2, `collective` and `plan` wherever the host is.
+ */
+type CreateField = 'name' | 'slug' | 'venues' | 'collective' | 'plan';
+
+async function withField(response: NextResponse, field: CreateField): Promise<NextResponse> {
+  const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  return NextResponse.json({ ...body, field }, { status: response.status });
+}
+
 /** POST /api/venue/collectives — create a collective and invite linked venues. */
 export async function POST(request: NextRequest) {
   const resolved = await resolveLinkAdmin();
@@ -29,7 +43,7 @@ export async function POST(request: NextRequest) {
   const { ctx } = resolved;
   if (!ctx.eligibility.canCreate) {
     return NextResponse.json(
-      { error: ctx.eligibility.reason ?? 'Collectives cannot be created right now.' },
+      { error: ctx.eligibility.reason ?? 'Collectives cannot be created right now.', field: 'plan' },
       { status: 403 },
     );
   }
@@ -43,7 +57,7 @@ export async function POST(request: NextRequest) {
   const parsed = createCollectiveSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: 'Invalid request', details: parsed.error.flatten() },
+      { error: 'Please check the name and address.', details: parsed.error.flatten(), field: 'name' },
       { status: 400 },
     );
   }
@@ -59,6 +73,7 @@ export async function POST(request: NextRequest) {
         {
           error:
             'Your venue is already in a collective. Add members from the combined page’s Members tab, or dissolve it first.',
+          field: 'collective',
         },
         { status: 409 },
       );
@@ -70,20 +85,29 @@ export async function POST(request: NextRequest) {
     );
     if (inviteVenueIds.length === 0) {
       return NextResponse.json(
-        { error: 'Invite at least one other linked venue.' },
+        { error: 'Invite at least one other linked venue.', field: 'venues' },
         { status: 400 },
       );
     }
+    // One live collective per venue (§6.7): an invitee already in one is refused by name.
+    const taken = await exclusivityRefusal(ctx.admin, inviteVenueIds, undefined, 'invite');
+    if (taken) return withField(taken, 'venues');
+    const noAppointments = await noAppointmentsRefusal(ctx.admin, inviteVenueIds);
+    if (noAppointments) return withField(noAppointments, 'venues');
 
     // Slug uniqueness among collectives.
     const { data: slugTaken } = await ctx.admin
       .from('venue_collectives')
-      .select('id')
+      .select('id, status, host_venue_id')
       .eq('slug', slug)
       .maybeSingle();
-    if (slugTaken) {
+    // DL4: an ended collective keeps its address for its neutral page, but its own host may take it
+    // back for a new collective straight away. Anyone else waits for the 90 days.
+    if (slugTaken && slugTaken.status === 'dissolved' && slugTaken.host_venue_id === ctx.venueId) {
+      await releaseDissolvedAddress(ctx.admin, slugTaken.id as string);
+    } else if (slugTaken) {
       return NextResponse.json(
-        { error: 'That booking-page address is already in use. Choose another.' },
+        { error: 'That booking-page address is already in use. Choose another.', field: 'slug' },
         { status: 409 },
       );
     }
@@ -99,7 +123,7 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
     if (nameTaken) {
       return NextResponse.json(
-        { error: 'A collective with that name already exists. Choose another.' },
+        { error: 'A collective with that name already exists. Choose another.', field: 'name' },
         { status: 409 },
       );
     }
@@ -127,7 +151,7 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
     if (recentlyDissolved) {
       return NextResponse.json(
-        { error: 'That name isn’t available yet. Please choose another.' },
+        { error: 'That name isn’t available yet. Please choose another.', field: 'name' },
         { status: 409 },
       );
     }
@@ -135,11 +159,17 @@ export async function POST(request: NextRequest) {
     // Combined-only (plan §22 / D-V1): a collective is born as a combined page,
     // so the D4 write gate + D8 single-timezone check is enforced at create time
     // across every member (host + invitees).
-    const eligibility = await checkCombinedEligibility(ctx.admin, [ctx.venueId, ...inviteVenueIds]);
+    const eligibility = await checkCombinedEligibility(ctx.admin, [ctx.venueId, ...inviteVenueIds], {
+      hostVenueId: ctx.venueId,
+    });
     if (!eligibility.ok) {
       return NextResponse.json(
-        { error: eligibility.reason ?? 'These venues can’t run a combined page yet.' },
-        { status: 400 },
+        {
+          error: eligibility.reason ?? 'These venues can’t run a combined page yet.',
+          ...(eligibility.code ? { code: eligibility.code } : {}),
+          field: 'venues',
+        },
+        { status: eligibility.code ? 409 : 400 },
       );
     }
 
@@ -154,6 +184,8 @@ export async function POST(request: NextRequest) {
         status: 'active',
         page_mode: 'unified_catalog',
         timezone: eligibility.timezone,
+        // D37: the platform console decides which model a new collective starts on.
+        service_model: await newCollectiveServiceModel(ctx.admin),
       })
       .select('id')
       .single();

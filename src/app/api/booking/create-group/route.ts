@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { parkedServiceRefusal } from '@/lib/linked-accounts/replicas/parking';
+import { recordCollectiveBookingAudit } from '@/lib/linked-accounts/audit';
+import { isStaffBookingSource, loadStaffOnlyServiceIds } from '@/lib/booking/staff-only-services';
+import { apiError } from '@/lib/api/error-codes';
+import { collectiveDbError } from '@/lib/linked-accounts/replicas/db-errors';
+import type { RpcClient } from '@/lib/linked-accounts/replicas/crons';
 import { createRouteHandlerClient } from '@/lib/supabase/server';
 import { stripe } from '@/lib/stripe';
 import { cancelAbandonedPaymentIntent } from '@/lib/booking/cancel-abandoned-payment-intent';
@@ -56,9 +62,11 @@ import {
 } from '@/lib/booking/entity-booking-window';
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
 import { resolveStaffVisitChargeDiscretion } from '@/lib/booking/staff-visit-charge-discretion';
-import { isCollectiveId, resolveCombinedBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
+import { isCollectiveId, resolveCollectiveBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
+import { bookingRequiresSignIn } from '@/lib/linked-accounts/replicas/collective-sign-in';
 import { recordStaffCollectiveCrossVenueCreate } from '@/lib/linked-accounts/collective-staff-audit';
-import { resolveCollectiveServiceOverride } from '@/lib/linked-accounts/collective-booking-override';
+import { resolveStaffBookingActor, type StaffOverrideActor } from '@/lib/booking/staff-availability-override';
+import { resolveCollectiveServiceAttribution } from '@/lib/linked-accounts/collective-booking-override';
 import { nextResponseIfPublicBookingBlockedForRequest } from '@/lib/booking/light-plan-public-block';
 import { nextResponseIfVenueRequiresAccountLoginForBooking } from '@/lib/booking/require-account-login-for-public-booking';
 import { formatGuestDisplayName, normaliseGuestNamePart } from '@/lib/guests/name';
@@ -211,17 +219,19 @@ export async function POST(request: NextRequest) {
       let owningVenueId: string | null = null;
       for (let i = 0; i < people.length; i++) {
         const person = people[i]!;
-        const target = await resolveCombinedBookingTarget(supabase, {
-          collectiveId,
-          offeringId: person.appointment_service_id,
-          calendarId: person.practitioner_id,
-        });
-        if (!target) {
+        // A staff source is checked below (resolveStaffBookingActor) before anything is written.
+        const resolved = await resolveCollectiveBookingTarget(
+          supabase,
+          { collectiveId, offeringId: person.appointment_service_id, calendarId: person.practitioner_id },
+          source === 'phone' || source === 'walk-in' ? 'staff' : 'public',
+        );
+        if (!resolved.ok) {
           return NextResponse.json(
-            { error: 'This booking option is no longer available.' },
+            { error: resolved.error, ...(resolved.code ? { code: resolved.code } : {}) },
             { status: 409 },
           );
         }
+        const target = resolved.target;
         if (owningVenueId && owningVenueId !== target.venueId) {
           return NextResponse.json(
             {
@@ -236,6 +246,17 @@ export async function POST(request: NextRequest) {
         person.appointment_service_id = target.sourceServiceId;
       }
       if (owningVenueId) venue_id = owningVenueId;
+    }
+
+    // A staff source waives deposits and softens compliance, so it needs a staff member who
+    // may book here (CB-23), and that staff member is stamped on every row (CB-26).
+    let staffActor: Extract<StaffOverrideActor, { ok: true }> | null = null;
+    if (source === 'phone' || source === 'walk-in') {
+      const actor = await resolveStaffBookingActor(supabase, request, { venueId: venue_id, collectiveId });
+      if (!actor.ok) {
+        return NextResponse.json({ error: actor.error }, { status: actor.status });
+      }
+      staffActor = actor;
     }
 
     const { data: venue, error: venueErr } = await supabase
@@ -257,8 +278,11 @@ export async function POST(request: NextRequest) {
     // request must not answer under two auth models (P0-12).
     const authClient = await createRouteHandlerClient(request);
     const loginDenied = await nextResponseIfVenueRequiresAccountLoginForBooking({
-      requireAccountLogin: Boolean(
-        (venue as { require_account_login_for_bookings?: boolean }).require_account_login_for_bookings,
+      // D32: through a shared-services collective page, the host's setting decides.
+      requireAccountLogin: await bookingRequiresSignIn(
+        supabase,
+        collectiveId,
+        Boolean((venue as { require_account_login_for_bookings?: boolean }).require_account_login_for_bookings),
       ),
       authSupabase: authClient,
       bookingEmail: customerEmail,
@@ -341,11 +365,10 @@ export async function POST(request: NextRequest) {
 
       // Inject phantom bookings from earlier people in this group (overlap checks)
       input.phantomBookings = [...phantoms];
-      // Combined page: the offering's effective price and duration on this
-      // calendar stand in for the source service's base terms, applied before
-      // the variant and add-ons as the single-booking route does.
-      const collectiveOverride = collectiveId
-        ? await resolveCollectiveServiceOverride(supabase, {
+      // Combined page: which offering this person booked. Attribution only; each
+      // person is sized and charged at their calendar's own terms (CB-02).
+      const collectiveAttribution = collectiveId
+        ? await resolveCollectiveServiceAttribution(supabase, {
             collectiveId,
             collectiveServiceItemId: collectiveOfferingByPerson.get(i) ?? null,
             venueId: venue_id,
@@ -353,18 +376,6 @@ export async function POST(request: NextRequest) {
             practitionerId: person.practitioner_id,
           })
         : null;
-      if (collectiveOverride) {
-        const oidx = input.services.findIndex((s) => s.id === person.appointment_service_id);
-        if (oidx >= 0) {
-          input.services[oidx] = {
-            ...input.services[oidx]!,
-            ...(collectiveOverride.durationMinutes != null
-              ? { duration_minutes: collectiveOverride.durationMinutes }
-              : {}),
-            ...(collectiveOverride.pricePence != null ? { price_pence: collectiveOverride.pricePence } : {}),
-          };
-        }
-      }
 
       let chosenVariant = null as Awaited<ReturnType<typeof loadActiveVariantForService>>;
       if (person.service_variant_id) {
@@ -589,7 +600,7 @@ export async function POST(request: NextRequest) {
         addon_snapshots: personAddonSnapshots,
         addons_total_price_pence: personAddonTotals.total_price_pence,
         addons_total_duration_minutes: personAddonTotals.total_duration_minutes,
-        collective_service_item_id: collectiveOverride ? collectiveOverride.collectiveServiceItemId : null,
+        collective_service_item_id: collectiveAttribution ? collectiveAttribution.collectiveServiceItemId : null,
       });
 
       phantoms.push({
@@ -634,6 +645,28 @@ export async function POST(request: NextRequest) {
         { error: 'Venue has not set up payments; deposits are required for these services.' },
         { status: 400 }
       );
+    }
+
+    // "Staff bookings only" (plan §6.6): staff sources may book it, a guest source may not.
+    if (!isStaffBookingSource(source)) {
+      const staffOnly = await loadStaffOnlyServiceIds(supabase, validatedPeople.map((p) => p.appointment_service_id));
+      if (validatedPeople.some((p) => staffOnly.has(p.appointment_service_id))) {
+        return NextResponse.json(
+          apiError('This service is not bookable online. Please contact the venue to book it.', 'SERVICE_NOT_BOOKABLE_ONLINE'),
+          { status: 409 },
+        );
+      }
+    }
+
+    // D2: a venue live in a collective takes new bookings only for the collective's services.
+    if (useUnifiedBookingRows) {
+      const parked = await parkedServiceRefusal(
+        supabase as unknown as RpcClient,
+        validatedPeople.map((p) => ({ venueId: venue_id, serviceItemId: p.appointment_service_id })),
+      );
+      if (parked) {
+        return NextResponse.json(parked.body, { status: parked.status });
+      }
     }
 
     // Per-person service delivery location: any client-address service in the group
@@ -824,6 +857,9 @@ export async function POST(request: NextRequest) {
         booking_model: useUnifiedBookingRows ? 'unified_scheduling' : 'practitioner_appointment',
         status: hasPaymentStep ? 'Pending' : 'Booked',
         source,
+        created_by_staff_id: staffActor?.staff.id ?? null,
+        created_by_linked_venue_id:
+          staffActor && staffActor.staff.venue_id !== venue_id ? staffActor.staff.venue_id : null,
         guest_email: guest.email,
         dietary_notes: dietary_notes?.trim() || null,
         guest_first_name: guestFirst,
@@ -881,6 +917,10 @@ export async function POST(request: NextRequest) {
         if (bookingIds.length > 0) {
           await supabase.from('bookings').delete().in('id', bookingIds);
         }
+        const collectiveRefusal = collectiveDbError(bookErr);
+        if (collectiveRefusal) {
+          return NextResponse.json(collectiveRefusal.body, { status: collectiveRefusal.status });
+        }
         return NextResponse.json({ error: 'Failed to create group booking' }, { status: 500 });
       }
 
@@ -895,6 +935,26 @@ export async function POST(request: NextRequest) {
       }
 
       bookingIds.push(booking.id);
+    }
+
+
+    // §6.5: a member's staff booking at another member's venue through the collective is audited,
+    // stamping the acting venue. A booking at the acting venue's own calendars is not cross-venue.
+    if (collectiveId && staffActor?.via === 'collective') {
+      const auditCollectiveId = collectiveId;
+      const actingVenueId = staffActor.staff.venue_id;
+      const actingUserId = staffActor.userId;
+      const auditedBookingIds = [...bookingIds];
+      after(async () => {
+        await recordCollectiveBookingAudit({
+          admin: supabase,
+          collectiveId: auditCollectiveId,
+          actingVenueId,
+          actingUserId,
+          owningVenueId: venue_id,
+          bookingIds: auditedBookingIds,
+        });
+      });
     }
 
     // Attach any inline-captured compliance records to the (first) booking of the group.

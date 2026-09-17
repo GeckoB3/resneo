@@ -9,6 +9,15 @@ import {
 import { checkCombinedEligibility } from '@/lib/linked-accounts/catalogue';
 import { invalidateCollectiveCatalogMemo } from '@/lib/linked-accounts/collective-venue';
 import {
+  isHostingAction,
+  legacyTransferRefused,
+  runHostingAction,
+} from '@/lib/linked-accounts/replicas/hosting-actions';
+import { runJoin } from '@/lib/linked-accounts/replicas/join';
+import { runReleaseAction } from '@/lib/linked-accounts/replicas/release-actions';
+import { exclusivityRefusal, noAppointmentsRefusal } from '@/lib/linked-accounts/collective-venue-locks';
+import { setListOnOldPage } from '@/lib/linked-accounts/replicas/dissolved-page';
+import {
   notifyCollectiveDissolved,
   notifyCollectiveHostTransferred,
   notifyCollectiveInvitation,
@@ -70,6 +79,17 @@ export async function PATCH(
       return NextResponse.json({ error: 'Collective not found.' }, { status: 404 });
     }
     const collective = collectiveData as CollectiveRow;
+    // Contract 9: after the end, a former member chooses whether the old page lists it (D25).
+    if (collective.status === 'dissolved' && input.action === 'configure' && input.list_on_old_page !== undefined) {
+      const changed = await setListOnOldPage(ctx.admin, collectiveId, ctx.venueId, input.list_on_old_page);
+      if (!changed) {
+        return NextResponse.json(
+          { error: 'Your venue was not part of this collective when it ended, or its old page has closed.' },
+          { status: 404 },
+        );
+      }
+      return NextResponse.json({ ok: true, list_on_old_page: input.list_on_old_page });
+    }
     if (collective.status !== 'active') {
       return NextResponse.json({ error: 'This collective has been dissolved.' }, { status: 409 });
     }
@@ -83,6 +103,25 @@ export async function PATCH(
       .eq('venue_id', ctx.venueId)
       .in('status', ['invited', 'active'])
       .maybeSingle();
+
+    // On the shared-services model, joining, leaving and removal belong to the engine (contracts 6, 7).
+    const usesEngine = async () => {
+      const { data: model } = await ctx.admin
+        .from('venue_collectives')
+        .select('service_model')
+        .eq('id', collectiveId)
+        .maybeSingle();
+      return model?.service_model === 'replicas';
+    };
+    const releaseContext = {
+      admin: ctx.admin,
+      collectiveId,
+      collectiveName: collective.name,
+      hostVenueId: collective.host_venue_id,
+      venueId: ctx.venueId,
+      venueName: ctx.venue.name,
+      userId: ctx.userId,
+    };
 
     const finish = async () => {
       // Membership decides whose calendars the memoised catalogue may offer.
@@ -117,27 +156,47 @@ export async function PATCH(
           { status: 409 },
         );
       }
+      // One live collective per venue (§6.7).
+      const taken = await exclusivityRefusal(ctx.admin, [input.venueId], collectiveId, 'invite');
+      if (taken) return taken;
+      const noAppointments = await noAppointmentsRefusal(ctx.admin, [input.venueId]);
+      if (noAppointments) return noAppointments;
       const members = await activeMemberVenueIds(ctx.admin, collectiveId);
       // Same gate as collective CREATE (D4 mutual write + D8 single timezone) — an
       // invite must not admit a venue the create path would have rejected.
-      const eligibility = await checkCombinedEligibility(ctx.admin, [input.venueId, ...members]);
+      const eligibility = await checkCombinedEligibility(ctx.admin, [input.venueId, ...members], {
+        hostVenueId: collective.host_venue_id,
+      });
       if (!eligibility.ok) {
         return NextResponse.json(
           {
             error:
               eligibility.reason ??
               'That venue can’t join the combined page yet.',
+            ...(eligibility.code ? { code: eligibility.code } : {}),
           },
-          { status: 400 },
+          { status: eligibility.code ? 409 : 400 },
         );
       }
-      await ctx.admin.from('venue_collective_members').insert({
-        collective_id: collectiveId,
-        venue_id: input.venueId,
-        status: 'invited',
-        display_order: members.length,
-        invited_by_user_id: ctx.userId,
-      });
+      const { data: invited } = await ctx.admin
+        .from('venue_collective_members')
+        .insert({
+          collective_id: collectiveId,
+          venue_id: input.venueId,
+          status: 'invited',
+          display_order: members.length,
+          invited_by_user_id: ctx.userId,
+        })
+        .select('id')
+        .maybeSingle();
+      // On the shared-services model the invitation is audited, so History shows it (§6.7).
+      if (invited?.id && (await usesEngine())) {
+        await ctx.admin.rpc('collective_record_invitation', {
+          p_member_id: invited.id,
+          p_actor_venue_id: ctx.venueId,
+          p_actor_user_id: ctx.userId,
+        });
+      }
       await notifyCollectiveInvitation(
         ctx.admin,
         input.venueId,
@@ -148,7 +207,30 @@ export async function PATCH(
     }
 
     // ---- transfer_host --------------------------------------------------
+    // ---- moving the hosting on the shared-services model (contract 8) ---
+    if (isHostingAction(input.action)) {
+      const refused = await runHostingAction(
+        {
+          admin: ctx.admin,
+          collectiveId,
+          collectiveName: collective.name,
+          hostVenueId: collective.host_venue_id,
+          venueId: ctx.venueId,
+          venueName: ctx.venue.name,
+          userId: ctx.userId,
+        },
+        { action: input.action, venueId: input.venueId, consent_version: input.consent_version },
+      );
+      return refused ?? finish();
+    }
+
     if (input.action === 'transfer_host') {
+      const { data: model } = await ctx.admin
+        .from('venue_collectives')
+        .select('service_model')
+        .eq('id', collectiveId)
+        .maybeSingle();
+      if (model?.service_model === 'replicas') return legacyTransferRefused(collective.name);
       if (!isHost) {
         return NextResponse.json(
           { error: 'Only the current host can transfer host status.' },
@@ -183,6 +265,42 @@ export async function PATCH(
       }
       if (!input.venueId || input.venueId === ctx.venueId) {
         return NextResponse.json({ error: 'Choose a member to remove.' }, { status: 400 });
+      }
+      if (await usesEngine()) {
+        const { data: target } = await ctx.admin
+          .from('venue_collective_members')
+          .select('id, status')
+          .eq('collective_id', collectiveId)
+          .eq('venue_id', input.venueId)
+          .eq('status', 'active')
+          .maybeSingle();
+        if (target) {
+          const result = await runReleaseAction(releaseContext, 'remove', {
+            id: target.id as string,
+            venueId: input.venueId,
+          });
+          return result.ok ? finish() : result.response;
+        }
+        // An open invitation is withdrawn: nothing was handed over, so nothing is released (N34).
+        const { data: invitation } = await ctx.admin
+          .from('venue_collective_members')
+          .select('id')
+          .eq('collective_id', collectiveId)
+          .eq('venue_id', input.venueId)
+          .eq('status', 'invited')
+          .maybeSingle();
+        if (invitation) {
+          const { error } = await ctx.admin.rpc('collective_close_invitation', {
+            p_member_id: invitation.id,
+            p_reason: 'withdrawn',
+            p_actor_venue_id: ctx.venueId,
+            p_actor_user_id: ctx.userId,
+          });
+          if (error) {
+            return NextResponse.json({ error: 'Could not withdraw the invitation. Please try again.' }, { status: 500 });
+          }
+          return finish();
+        }
       }
       await ctx.admin
         .from('venue_collective_members')
@@ -222,18 +340,49 @@ export async function PATCH(
           { status: 409 },
         );
       }
+      // On the shared-services model, joining is the engine's (contract 6): the venue's answers
+      // and its consent, one call, then the first copies and the notices.
+      if (await usesEngine()) {
+        const refused = await runJoin(
+          {
+            admin: ctx.admin,
+            collectiveId,
+            collectiveName: collective.name,
+            hostVenueId: collective.host_venue_id,
+            memberId: myMembership.id as string,
+            venueId: ctx.venueId,
+            venueName: ctx.venue.name,
+            userId: ctx.userId,
+          },
+          {
+            consent_version: input.consent_version,
+            same_name_choices: input.same_name_choices,
+            own_service_choices: input.own_service_choices,
+            form_choices: input.form_choices,
+          },
+        );
+        return refused ?? finish();
+      }
+      // One live collective per venue (§6.7); the engine checks again under its lock on the other model.
+      const taken = await exclusivityRefusal(ctx.admin, [ctx.venueId], collectiveId, 'accept');
+      if (taken) return taken;
+      const noAppointments = await noAppointmentsRefusal(ctx.admin, [ctx.venueId]);
+      if (noAppointments) return noAppointments;
       const members = await activeMemberVenueIds(ctx.admin, collectiveId);
       // Same gate as collective CREATE (D4 mutual write + D8 single timezone): link
       // or timezone changes since the invite must block acceptance, not just creation.
-      const eligibility = await checkCombinedEligibility(ctx.admin, [ctx.venueId, ...members]);
+      const eligibility = await checkCombinedEligibility(ctx.admin, [ctx.venueId, ...members], {
+        hostVenueId: collective.host_venue_id,
+      });
       if (!eligibility.ok) {
         return NextResponse.json(
           {
             error:
               eligibility.reason ??
               'Your venue can’t join the combined page yet.',
+            ...(eligibility.code ? { code: eligibility.code } : {}),
           },
-          { status: 400 },
+          { status: eligibility.code ? 409 : 400 },
         );
       }
       await ctx.admin
@@ -274,6 +423,19 @@ export async function PATCH(
           },
           { status: 400 },
         );
+      }
+      if (myMembership.status === 'active' && (await usesEngine())) {
+        const result = await runReleaseAction(releaseContext, 'leave', {
+          id: myMembership.id as string,
+          venueId: ctx.venueId,
+        });
+        if (!result.ok) return result.response;
+        invalidateCollectiveCatalogMemo(collectiveId);
+        const collectives = await loadCollectiveViewsForVenue(ctx.admin, ctx.venueId);
+        return NextResponse.json({
+          collective: collectives.find((c) => c.id === collectiveId) ?? null,
+          review: result.review,
+        });
       }
       await ctx.admin
         .from('venue_collective_members')

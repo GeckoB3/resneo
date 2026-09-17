@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Add and manage your team",
   description: "Invite your team by email, give each person the right role, and choose which calendars they look after.",
   tags: ["staff","team","roles","admin","permissions","invites","session timeout","calendars"],
-  verified: '2026-09-12',
+  verified: '2026-09-17',
   content: `# Add and manage your team
 
 Give the people you work with their own sign-in, decide what they can reach, and keep the account secure.
@@ -106,7 +106,7 @@ At the top of the **Staff** tab, the **My account** card has **Change Password**
 | The invitation never arrived | It went to spam, the address was mistyped, or they already had a ResNeo login | Check the address, use **Resend invitation email**, or ask them to try **Forgot password?** on the login page |
 | I cannot change my own role | You cannot change your own role or remove yourself | Ask another admin to do it |
 | A team member cannot edit their hours | Their account is not assigned to that calendar | Assign the calendar to them on the **Staff** tab |
-| A team member can see other people's bookings | This is expected. They can browse every calendar, but only change the ones assigned to them | Review their calendars on the **Staff** tab |
+| A team member can change other people's bookings | This is expected. Team members work with bookings on every calendar, as admins do. Their assigned calendars only limit hours, closures and service settings | Nothing to fix |
 
 ## Next steps
 

@@ -94,6 +94,7 @@ export default function BookingComplianceBlock({
   const [formsVenueId, setFormsVenueId] = useState<string>(venueId);
   // The request key the current `requirements` answer; `resolving` is derived from it so
   // no state is written synchronously inside the effect body.
+  const [formsDeferred, setFormsDeferred] = useState(false);
   const [resolvedKey, setResolvedKey] = useState<string | null>(null);
   const [formsState, setFormsState] = useState<BookingComplianceFormsState>(EMPTY_FORMS_STATE);
   const [precheckActive, setPrecheckActive] = useState(false);
@@ -161,8 +162,11 @@ export default function BookingComplianceBlock({
             identity_known?: boolean;
             requirements?: BookingRequirementView[];
             venue_id?: string;
+            /** A combined page with no calendar chosen yet: a form now would file at the wrong venue. */
+            forms_deferred?: boolean;
           };
           if (cancelled) return;
+          setFormsDeferred(Boolean(data.forms_deferred));
           setRequirements(data.requirements ?? []);
           setIdentityKnown(Boolean(data.identity_known));
           setFormsVenueId(data.venue_id || venueId);
@@ -226,6 +230,14 @@ export default function BookingComplianceBlock({
   const awaitingIdentity =
     !identityKnown && (requirements ?? []).some((r) => r.online_collection === 'inline' && r.client_online);
 
+  /**
+   * A combined page where the guest has not chosen a team member: the form belongs to whichever
+   * venue ends up with the booking, so it is not served yet (SEC-03). Say what to do about it.
+   */
+  const deferredFormsHere =
+    formsDeferred &&
+    (requirements ?? []).some((r) => r.online_collection === 'inline' && r.client_online && r.state !== 'SATISFIED');
+
   useEffect(() => {
     onChange({ ...formsState, resolving });
     // onChange is provided fresh each render by the parent; depending on it would loop.
@@ -233,13 +245,19 @@ export default function BookingComplianceBlock({
   }, [formsState, resolving]);
 
   const inlineActive = forms.length > 0 && Boolean(formsState.draftId);
-  const active = precheckActive || inlineActive || awaitingIdentity;
+  const active = precheckActive || inlineActive || awaitingIdentity || deferredFormsHere;
 
   return (
     <div className={active ? 'mb-4 rounded-xl border border-slate-200 bg-white p-4' : ''}>
       {active && <h4 className="mb-3 text-sm font-semibold text-slate-900">Before you book</h4>}
       <div className="space-y-3">
         <CompliancePreCheckNotice requirements={noticeRequirements} embedded onActiveChange={setPrecheckActive} />
+        {deferredFormsHere && (
+          <p className="text-xs text-slate-500" data-testid="compliance-forms-deferred">
+            This booking needs a short form. To fill it in now, choose a specific team member above.
+            Otherwise we will send it to you once your booking is confirmed.
+          </p>
+        )}
         {awaitingIdentity && (
           <p className="text-xs text-slate-500" data-testid="compliance-awaiting-identity">
             {identityEmail && resolving

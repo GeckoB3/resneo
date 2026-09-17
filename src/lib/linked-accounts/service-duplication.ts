@@ -11,6 +11,7 @@ import { createComplianceType } from '@/lib/compliance/types-service';
 import { loadVenueCatalogueData, normaliseServiceNameForMerge } from './catalogue';
 import { isMissingSyncColumnError } from './service-sync';
 import { cleanCategoryName, normaliseCategoryName } from './collective-categories';
+import { copyableColumns, loadColumnRegistry, type ColumnRegistry } from './column-classes';
 
 /**
  * Cross-venue service duplication for combined booking pages.
@@ -28,10 +29,10 @@ import { cleanCategoryName, normaliseCategoryName } from './collective-categorie
  * requirements. Only identity and venue-scoped references are recomputed for the new
  * venue: the row id, the venue, the display position (appended), the category, add-on
  * groups and compliance types (each matched by name at the new venue, or created there)
- * and the staff author (none). The row is read with `select('*')` and copied through a
- * denylist rather than an allowlist, so a column added to services later is copied without
- * anyone remembering this file; a new venue-scoped foreign key fails the insert loudly
- * instead of being silently dropped, which is how processing time went missing before.
+ * and the staff author (none). The row is read with `select('*')` and filtered through the
+ * collective column registry (`collective_column_classes`, column-classes.ts): only columns
+ * classified as travelling between venues are copied, so a column added later stays behind
+ * until a migration classifies it, rather than carrying one business's data into another.
  *
  * A copy is all or nothing: if any part of it cannot be written, the partial service is
  * removed again and the calendar is not assigned, so a half-configured service never
@@ -44,8 +45,8 @@ import { cleanCategoryName, normaliseCategoryName } from './collective-categorie
 
 type Row = Record<string, unknown>;
 
-/** `service_items` columns recomputed for the copy rather than taken from the origin. */
-const SERVICE_COLUMNS_NOT_COPIED = new Set([
+/** `service_items` columns this file sets itself; the registry decides the rest. */
+const SERVICE_COLUMNS_RECOMPUTED = new Set([
   'id',
   'venue_id',
   'name',
@@ -59,31 +60,12 @@ const SERVICE_COLUMNS_NOT_COPIED = new Set([
   'updated_at',
 ]);
 
-/** Identity and parent pointers on child rows (variants, add-on groups, options, requirements). */
-const CHILD_COLUMNS_NOT_COPIED = new Set([
-  'id',
-  'venue_id',
-  'service_item_id',
-  'appointment_service_id',
-  'addon_group_id',
-  'compliance_type_id',
-  'created_at',
-  'updated_at',
-  'archived_at',
-]);
 
 /** Postgres unique_violation. */
 const UNIQUE_VIOLATION = '23505';
 
 const CATEGORY_NAME_MAX = 80;
 
-function copyColumns(row: Row, skip: ReadonlySet<string>): Row {
-  const out: Row = {};
-  for (const [key, value] of Object.entries(row)) {
-    if (!skip.has(key)) out[key] = value;
-  }
-  return out;
-}
 
 /** Trimmed, single-spaced, lower-cased: how two names are judged to be the same thing. */
 function normaliseName(name: unknown): string {
@@ -117,8 +99,8 @@ export interface OfferingTemplate {
   durationMinutes: number;
   pricePence: number | null;
   /**
-   * Every other column of the origin `service_items` row, copied verbatim (see
-   * SERVICE_COLUMNS_NOT_COPIED). Empty when the offering has no provider left to copy from.
+   * The origin `service_items` columns the registry lets travel, minus those set here (see
+   * SERVICE_COLUMNS_RECOMPUTED). Empty when the offering has no provider left to copy from.
    */
   columns: Row;
   /** Heading to file the copy under: the origin's own category, else the offering's heading. */
@@ -181,7 +163,11 @@ function processingBlocksForCopy(raw: unknown, originDuration: number | null, co
   return check.normalized ?? [];
 }
 
-async function loadOriginVariants(admin: SupabaseClient, origin: { venueId: string; serviceId: string }) {
+async function loadOriginVariants(
+  admin: SupabaseClient,
+  registry: ColumnRegistry,
+  origin: { venueId: string; serviceId: string },
+) {
   const { data, error } = await admin
     .from('service_variants')
     .select('*')
@@ -192,11 +178,12 @@ async function loadOriginVariants(admin: SupabaseClient, origin: { venueId: stri
     console.error('[service-duplication] variants read failed:', error.message);
     return [];
   }
-  return ((data ?? []) as Row[]).map((v) => copyColumns(v, CHILD_COLUMNS_NOT_COPIED));
+  return ((data ?? []) as Row[]).map((v) => copyableColumns(registry, 'service_variants', v));
 }
 
 async function loadOriginAddonGroups(
   admin: SupabaseClient,
+  registry: ColumnRegistry,
   origin: { venueId: string; serviceId: string },
 ): Promise<AddonGroupTemplate[]> {
   const { data: links, error } = await admin
@@ -230,10 +217,10 @@ async function loadOriginAddonGroups(
     const group = groups.find((g) => g.id === link.addon_group_id);
     if (!group) return;
     templates.push({
-      group: copyColumns(group, CHILD_COLUMNS_NOT_COPIED),
+      group: copyableColumns(registry, 'addon_groups', group),
       addons: addons
         .filter((a) => a.addon_group_id === group.id)
-        .map((a) => copyColumns(a, CHILD_COLUMNS_NOT_COPIED)),
+        .map((a) => copyableColumns(registry, 'addons', a)),
       sortOrder: (link.sort_order as number | null) ?? idx,
     });
   });
@@ -242,6 +229,7 @@ async function loadOriginAddonGroups(
 
 async function loadOriginComplianceRequirements(
   admin: SupabaseClient,
+  registry: ColumnRegistry,
   origin: { venueId: string; serviceId: string },
 ): Promise<ComplianceRequirementTemplate[]> {
   const { data: reqs, error } = await admin
@@ -272,7 +260,7 @@ async function loadOriginComplianceRequirements(
     const type = types.find((t) => t.id === req.compliance_type_id);
     if (!type) continue;
     templates.push({
-      requirement: copyColumns(req, CHILD_COLUMNS_NOT_COPIED),
+      requirement: copyableColumns(registry, 'service_compliance_requirements', req),
       type,
       formSchema: schemaByVersion.get((type.current_version_id as string | null) ?? '') ?? null,
     });
@@ -362,7 +350,8 @@ export async function loadOfferingTemplate(
   const pricePence =
     (offering.default_price_pence as number | null) ?? (service.price_pence as number | null) ?? null;
 
-  const columns = copyColumns(service, SERVICE_COLUMNS_NOT_COPIED);
+  const registry = await loadColumnRegistry(admin);
+  const columns = copyableColumns(registry, 'service_items', service, SERVICE_COLUMNS_RECOMPUTED);
   let copyDurationMinutes = durationMinutes;
   if ('processing_time_blocks' in service) {
     // The copy carries the canonical shape whatever the origin row holds, so a
@@ -378,9 +367,9 @@ export async function loadOfferingTemplate(
   }
 
   const [variants, addonGroups, complianceRequirements, categoryName] = await Promise.all([
-    loadOriginVariants(admin, origin),
-    loadOriginAddonGroups(admin, origin),
-    loadOriginComplianceRequirements(admin, origin),
+    loadOriginVariants(admin, registry, origin),
+    loadOriginAddonGroups(admin, registry, origin),
+    loadOriginComplianceRequirements(admin, registry, origin),
     resolveTemplateCategoryName(
       admin,
       (service.category_id as string | null | undefined) ?? null,

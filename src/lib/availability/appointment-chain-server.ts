@@ -38,8 +38,6 @@ export interface ChainSegmentRequest {
   addonIds?: string[];
   /** Staff custom duration: replaces the base (or variant) duration before add-ons. */
   customDurationMinutes?: number | null;
-  /** Combined page: the collective's own length for this offering, applied before the variant. */
-  durationOverrideMinutes?: number | null;
 }
 
 export interface VenueClockRow {
@@ -64,7 +62,10 @@ export async function prepareChainSegments(params: {
   practitionerId: string;
   segments: ChainSegmentRequest[];
   clock: VenueClockRow;
-  /** Null skips the per-service booking window (the combined page's existing behaviour). */
+  /**
+   * Null skips the per-service booking window. No live caller passes null any more: the
+   * combined page did, so a visit there ignored each service's notice and advance limits (CB-09).
+   */
   bookingModel: string | null;
   phantoms?: PhantomBooking[];
   excludeBookingId?: string;
@@ -99,9 +100,6 @@ export async function prepareChainSegments(params: {
      * (add-ons included) rather than starting where the catalogue service ends.
      */
     const withDuration = (s: typeof svc, duration: number) => serviceWithDurationMinutes(s, duration);
-    if (seg.durationOverrideMinutes != null) {
-      svc = withDuration(svc, seg.durationOverrideMinutes);
-    }
     if (seg.variantId) {
       const variant = await loadActiveVariantForService({
         admin: supabase,

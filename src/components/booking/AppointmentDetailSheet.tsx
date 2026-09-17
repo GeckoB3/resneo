@@ -120,6 +120,7 @@ export interface BookingDetailRecord {
   service_variant_id?: string | null;
   service_variant_name?: string | null;
   service_variant_price_pence?: number | null;
+  service_price_snapshot_pence?: number | null;
   /** Snapshot of add-ons chosen at booking time (renders in the detail sheet). */
   addons?: Array<{
     id: string;
@@ -771,7 +772,7 @@ export function AppointmentDetailSheet({
                   <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Price</dt>
                   <dd className="mt-0.5 text-slate-700">
                     {(() => {
-                      const variantPrice = detail.service_variant_price_pence;
+                      const variantPrice = detail.service_price_snapshot_pence ?? detail.service_variant_price_pence;
                       if (variantPrice != null) {
                         return formatBookablePricePence(Number(variantPrice), sym);
                       }

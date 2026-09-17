@@ -2,6 +2,7 @@
 
 import { Button } from '@/components/ui/primitives/Button';
 import { Dialog } from '@/components/ui/primitives/Dialog';
+import { ConfirmDialog } from '@/components/ui/primitives/ConfirmDialog';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import {
@@ -69,15 +70,47 @@ import { ComplianceRequirementsEditor } from '@/components/dashboard/compliance/
 import { complianceJsonFetcher } from '@/components/dashboard/compliance/shared';
 import { useAppointmentsFeatureFlag } from '@/components/providers/VenueFeatureFlagsProvider';
 import { Pill } from '@/components/ui/dashboard/Pill';
+import {
+  EditReachNote,
+  CollectivePill,
+  FromHostPill,
+  ParkedPill,
+  RetiredPill,
+  VenueSyncPill,
+} from '@/components/linked-accounts/collective/CollectivePills';
+import {
+  CollectiveServicesBanner,
+  CollectiveServicesFilter,
+  type CollectiveServicesFilterValue,
+} from '@/components/linked-accounts/collective/CollectiveServicesBanner';
+import { ReleaseReviewCard } from '@/components/linked-accounts/collective/ReleaseReview';
+import { AddFromVenueDialog, AdoptionRequests } from '@/components/linked-accounts/collective/Adoptions';
+import type { CollectiveServiceBlock } from '@/lib/linked-accounts/replicas/service-blocks';
+import type { CollectiveCalendarGroup } from '@/lib/linked-accounts/replicas/host-calendars';
+import { hiddenPillVenue } from '@/lib/linked-accounts/replicas/status';
+import {
+  CollectiveCalendarsSection,
+  EMPTY_CALENDARS_VALUE,
+  type CollectiveCalendarsValue,
+} from '@/components/linked-accounts/collective/CollectiveCalendarsSection';
+import { CollectiveSaveSummary } from '@/components/linked-accounts/collective/CollectiveSaveSummary';
+import { MemberServiceView } from '@/components/linked-accounts/collective/MemberServiceView';
+import { CollectiveTodoStrip } from '@/components/linked-accounts/collective/CollectiveTodoStrip';
+import { buildCollectiveTodos } from '@/lib/linked-accounts/replicas/collective-todos';
+import type { CollectiveSync } from '@/lib/linked-accounts/replicas/inline-apply';
+import { collectiveCopy, formatVenueList } from '@/lib/linked-accounts/collective-copy';
 import { DashboardCardGridSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { TabBar } from '@/components/ui/dashboard/TabBar';
 import { AddonsLibraryView } from '@/app/dashboard/addons/AddonsLibraryView';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useVenueWideBlocks } from '@/lib/hooks/use-venue-wide-blocks';
+import { calendarValuesClearedByFlagChange } from '@/lib/venue/calendar-values-flag-off';
 
 interface Service {
   id: string;
+  /** Echoed back as `expected_updated_at` so a save made from a stale copy is refused (412). */
+  updated_at?: string | null;
   /** Staff row id of the creator; non-admins may edit/delete only when this matches their staff id. */
   created_by_staff_id?: string | null;
   name: string;
@@ -117,6 +150,10 @@ interface Service {
   location_type?: string | null;
   online_meeting_url?: string | null;
   online_meeting_info?: string | null;
+  /** False means "staff bookings only": the team can book it, guests never see it (Appendix F). */
+  is_bookable_online?: boolean;
+  /** What this service is to the collective, when the venue is in one (W5). Null at every venue today. */
+  collective?: CollectiveServiceBlock | null;
 }
 
 
@@ -142,6 +179,86 @@ interface PractitionerServiceLink {
 }
 
 
+/**
+ * What one service is to the collective, in pills: what it is, and how its copies are doing. A
+ * service that is up to date says so once and quietly; anything else names the venue in the pill's
+ * own reason sentence, which comes from the API so a host and a member read the same words.
+ */
+function CollectiveServicePills({ block }: { block: CollectiveServiceBlock }) {
+  return (
+    <>
+      {block.role === 'master' ? <CollectivePill collectiveName={block.collective_name} /> : null}
+      {block.role === 'replica' ? <FromHostPill hostName={block.host_venue_name} /> : null}
+      {block.role === 'retired' ? <RetiredPill /> : null}
+      {block.role === 'parked' ? <ParkedPill collectiveName={block.collective_name} /> : null}
+      {block.role === 'parked' ? null : (
+        <VenueSyncPill
+          status={block.status}
+          reason={block.status_reason}
+          label={(() => {
+            const venue = block.status === 'hidden' ? hiddenPillVenue(block.hidden_reasons) : null;
+            return venue ? collectiveCopy('svc.card.hiddenAt', { venue }) : null;
+          })()}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * The one line a member reads under a service its host manages (UX spec §2 item 3). First match
+ * wins, because a service that is still setting up has nothing useful to say about Stripe yet.
+ */
+function MemberServiceLine({
+  block,
+  paymentRequirement,
+}: {
+  block: CollectiveServiceBlock;
+  paymentRequirement: string | null;
+}) {
+  const host = block.host_venue_name;
+  if (block.status === 'setting_up') {
+    return <p className="text-xs text-slate-600">{collectiveCopy('svc.member.card.settingUp')}</p>;
+  }
+  if (block.status === 'updating') {
+    return <p className="text-xs text-slate-600">{collectiveCopy('svc.member.card.updating', { host })}</p>;
+  }
+  if (block.status === 'failed') {
+    return <p className="text-xs text-rose-700">{collectiveCopy('svc.member.card.failed', { host })}</p>;
+  }
+  const hidden = block.hidden_reasons[0];
+  if (hidden?.reason === 'payments') {
+    return (
+      <p className="text-xs text-amber-800">
+        {collectiveCopy('svc.member.card.noStripe', {
+          paymentKind:
+            paymentRequirement === 'card_hold'
+              ? 'a card hold'
+              : paymentRequirement === 'full_payment'
+                ? 'payment in full'
+                : paymentRequirement === 'deposit'
+                  ? 'a deposit'
+                  : 'a payment',
+        })}{' '}
+        <Link href="/dashboard/settings?tab=payments" className="font-medium text-brand-700 underline underline-offset-2">
+          {collectiveCopy('svc.member.card.connectStripe')}
+        </Link>
+      </p>
+    );
+  }
+  if (hidden?.reason === 'forms') {
+    return (
+      <p className="text-xs text-amber-800">
+        {collectiveCopy('svc.member.card.formsOff', { forms: 'a form' })}{' '}
+        <Link href="/dashboard/settings?tab=compliance" className="font-medium text-brand-700 underline underline-offset-2">
+          {collectiveCopy('svc.member.card.turnOn')}
+        </Link>
+      </p>
+    );
+  }
+  return null;
+}
+
 type ServicesPageTab = 'services' | 'categories' | 'addons';
 
 /**
@@ -149,7 +266,7 @@ type ServicesPageTab = 'services' | 'categories' | 'addons';
  * `acknowledge_affected_bookings` once the operator has chosen what happens to them.
  */
 type PendingServiceRemoval =
-  | { kind: 'calendar_links'; calendarId: string; serviceIds: string[] }
+  | { kind: 'calendar_links'; calendarId: string; serviceIds: string[]; expectedServiceIds: string[] }
   | { kind: 'service_form'; payload: Record<string, unknown> };
 
 function servicesPageTabFromParam(raw: string | null): ServicesPageTab {
@@ -218,6 +335,12 @@ function penceToPounds(pence: number | null): string {
   return (pence / 100).toFixed(2);
 }
 
+/** "price", "price and deposit", "price, deposit and length". */
+function joinFieldLabels(labels: string[]): string {
+  if (labels.length <= 1) return labels[0] ?? '';
+  return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+}
+
 export function AppointmentServicesView({
   isAdmin,
   currentStaffId,
@@ -242,6 +365,33 @@ export function AppointmentServicesView({
 
   const [services, setServices] = useState<Service[]>([]);
   const [categories, setCategories] = useState<ServiceCategoryRef[]>([]);
+  // Host admins are handed every calendar in the collective; everyone else gets nothing here.
+  const [collectiveCalendars, setCollectiveCalendars] = useState<CollectiveCalendarGroup[]>([]);
+  // "Add from another venue" (host) and what it said when done (UX spec `svc.addFrom.*`).
+  const [addFromOpen, setAddFromOpen] = useState(false);
+  const [addFromDone, setAddFromDone] = useState<string | null>(null);
+  // A parked service suggested to the host (contract 10, N25), and the answer.
+  const [suggestAsk, setSuggestAsk] = useState<Service | null>(null);
+  const [suggestNote, setSuggestNote] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
+  const [addFromPresetUsed, setAddFromPresetUsed] = useState(false);
+  const [collectiveFilter, setCollectiveFilter] = useState<CollectiveServicesFilterValue>('all');
+  /** Calendar ticks the host has changed but not saved: intent, never a picture of the whole set. */
+  const [collectiveCalendarsDiff, setCollectiveCalendarsDiff] =
+    useState<CollectiveCalendarsValue>(EMPTY_CALENDARS_VALUE);
+  const [collectiveSave, setCollectiveSave] = useState<{ sync: CollectiveSync; serviceName: string } | null>(null);
+  const [staleService, setStaleService] = useState<{ id: string; name: string } | null>(null);
+  /** A service the host manages, opened to look at and to choose this venue's calendars (W6). */
+  const [viewingService, setViewingService] = useState<Service | null>(null);
+  const [viewingError, setViewingError] = useState<string | null>(null);
+  /** The member view listed bookings on a calendar being unticked; the next save keeps them. */
+  const [viewingNeedsAck, setViewingNeedsAck] = useState(false);
+  /** The host flipping a service's "On the page" switch: asked first, then offered or withdrawn. */
+  const [offerAsk, setOfferAsk] = useState<{ svc: Service; offer: boolean } | null>(null);
+  const [offerBusy, setOfferBusy] = useState<Set<string>>(() => new Set());
+  /** New services go on the collective page unless the host unticks it (UX spec §2 item 1). */
+  const [addToPage, setAddToPage] = useState(true);
+  /** Set by the stale ask: the service to open again once the fresh list has arrived. */
+  const [reopenServiceId, setReopenServiceId] = useState<string | null>(null);
   const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
   const [links, setLinks] = useState<PractitionerServiceLink[]>([]);
 
@@ -258,8 +408,20 @@ export function AppointmentServicesView({
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  /** What the open edit form was loaded from, sent back so the server can refuse a stale save. */
+  const [editingBaseline, setEditingBaseline] = useState<{ updatedAt: string | null; calendarIds: string[] } | null>(
+    null,
+  );
   const [form, setForm] = useState<AppointmentServiceFormValues>(DEFAULT_APPOINTMENT_SERVICE_FORM_VALUES);
   const [saving, setSaving] = useState(false);
+  /**
+   * A save that turns off a staff permission box some calendars stored values under (D6, D56):
+   * the admin confirms before those values are cleared.
+   */
+  const [pendingFlagClear, setPendingFlagClear] = useState<{
+    payload: Record<string, unknown>;
+    clears: ReturnType<typeof calendarValuesClearedByFlagChange>;
+  } | null>(null);
   /** Services whose active flag is being flipped from the card, so the switch can lock while it saves. */
   const [activeToggling, setActiveToggling] = useState<Set<string>>(() => new Set());
   const complianceEnabled = useAppointmentsFeatureFlag('compliance_records_enabled');
@@ -297,6 +459,11 @@ export function AppointmentServicesView({
   // Tab navigation: "services" (default) or "addons". Synced to the URL via
   // `?tab=addons` so deep-links and the back button work as expected.
   const searchParams = useSearchParams();
+  // The host arriving from N25 lands with that venue and service chosen.
+  const addFromPreset = useMemo(() => {
+    const venueId = searchParams.get('add_from');
+    return venueId ? { venueId, serviceId: searchParams.get('service') } : null;
+  }, [searchParams]);
   const router = useRouter();
   const pathname = usePathname();
   const initialTab: ServicesPageTab = servicesPageTabFromParam(searchParams.get('tab'));
@@ -370,6 +537,9 @@ export function AppointmentServicesView({
       setServices(svcData.services ?? []);
       setLinks(svcData.practitioner_services ?? []);
       setCategories(Array.isArray(svcData.categories) ? (svcData.categories as ServiceCategoryRef[]) : []);
+      setCollectiveCalendars(
+        Array.isArray(svcData.collective_calendars) ? (svcData.collective_calendars as CollectiveCalendarGroup[]) : [],
+      );
       setPractitioners(practData.practitioners ?? []);
     } catch {
       setError('Failed to load services. Please check your connection.');
@@ -421,12 +591,99 @@ export function AppointmentServicesView({
     [form.practitioner_ids, practitioners],
   );
 
+  /**
+   * The collective this venue is in, as the services themselves report it (W5). Every service in a
+   * live collective carries the same collective and host names, and the role says which side of it
+   * this venue is on. Null at every venue today.
+   */
+  const collective = useMemo(() => {
+    const block = services.find((s) => s.collective)?.collective ?? null;
+    if (!block) return null;
+    const roles = new Set(services.map((s) => s.collective?.role).filter(Boolean));
+    return {
+      id: block.collective_id,
+      name: block.collective_name,
+      hostVenueName: block.host_venue_name,
+      isHost: roles.has('master') || !roles.has('replica'),
+    };
+  }, [services]);
+
+  /**
+   * The service open in the form, when the host has it on the collective page. Its calendars are
+   * then chosen across every venue through the engine, so the form's own calendar list steps aside.
+   */
+  const editingCollectiveBlock = useMemo(() => {
+    if (!editingId) return null;
+    const block = services.find((s) => s.id === editingId)?.collective ?? null;
+    return block && block.role === 'master' ? block : null;
+  }, [editingId, services]);
+
+  /** True for a copy of a service the host manages: this venue can look, not change (R10). */
+  const isManagedByHost = useCallback(
+    (svc: Service) => svc.collective?.role === 'replica' || svc.collective?.role === 'retired',
+    [],
+  );
+
+  const collectiveMemberNames = useMemo(
+    () => collectiveCalendars.filter((g) => !g.is_host).map((g) => g.venue_name),
+    [collectiveCalendars],
+  );
+
+  /** Services on the collective page per heading, for the host's Categories tab (W6). */
+  const onPageCountByCategory = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const s of services) {
+      const categoryId = (s as { category_id?: string | null }).category_id;
+      if (!categoryId || s.collective?.role !== 'master') continue;
+      counts.set(categoryId, (counts.get(categoryId) ?? 0) + 1);
+    }
+    return counts;
+  }, [services]);
+
+  const collectiveBehindVenueNames = useMemo(
+    () => [
+      ...new Set(
+        collectiveCalendars.flatMap((g) => [...g.sync.pending, ...g.sync.failed].map((v) => v.venue_name)),
+      ),
+    ],
+    [collectiveCalendars],
+  );
+
+  /**
+   * The handful of things that stop guests booking and that nobody would otherwise notice: a
+   * service no calendar offers, a venue that has joined and chosen nothing, payments or forms in
+   * the way. Empty at a venue that is not in a collective, which is every venue today.
+   */
+  const collectiveTodos = useMemo(() => {
+    if (!collective) return [];
+    const offersByService = new Map<string, number>();
+    for (const link of links) {
+      offersByService.set(link.service_id, (offersByService.get(link.service_id) ?? 0) + 1);
+    }
+    return buildCollectiveTodos({
+      isHost: collective.isHost,
+      services: services.map((s) => ({ id: s.id, name: s.name, collective: s.collective ?? null })),
+      calendarGroups: collectiveCalendars,
+      ownCalendarCount: (serviceId) => offersByService.get(serviceId) ?? 0,
+      ownVenueId: collectiveCalendars.find((g) => !g.is_host)?.venue_id ?? null,
+    });
+  }, [collective, services, collectiveCalendars, links]);
+
+  const collectiveFilterCounts = useMemo(() => {
+    if (!collective) return undefined;
+    const onPage = services.filter((s) => s.collective && s.collective.role !== 'parked').length;
+    return { all: services.length, on_page: onPage, parked: services.length - onPage };
+  }, [collective, services]);
+
   /** Admins manage definitions for everyone. Non-admins see the full venue list read-only; they edit what they offer under Availability. */
   const visibleServices = useMemo(() => {
-    if (isAdmin) return services;
-    if (linkedPractitionerIds.length === 0) return [];
-    return services;
-  }, [isAdmin, services, linkedPractitionerIds.length]);
+    const all = isAdmin || linkedPractitionerIds.length > 0 ? services : [];
+    if (!collective || collectiveFilter === 'all') return all;
+    // "Parked" is anything not on the page: a service with no collective block is parked too,
+    // because a venue in a live collective offers only the collective's services (D2).
+    const onPage = (svc: Service) => Boolean(svc.collective) && svc.collective!.role !== 'parked';
+    return all.filter((svc) => (collectiveFilter === 'on_page' ? onPage(svc) : !onPage(svc)));
+  }, [isAdmin, services, linkedPractitionerIds.length, collective, collectiveFilter]);
 
   // Manual display order (admins): drag a card, or use the arrow buttons, then the
   // order persists via /reorder and drives the public + staff booking service lists.
@@ -435,6 +692,16 @@ export function AppointmentServicesView({
   const [reorderError, setReorderError] = useState<string | null>(null);
 
   const categoryFor = useMemo(() => serviceCategoryLookup(categories), [categories]);
+
+  useEffect(() => {
+    if (!reopenServiceId) return;
+    const svc = services.find((s) => s.id === reopenServiceId);
+    if (!svc) return;
+    setReopenServiceId(null);
+    openEdit(svc);
+    // openEdit only sets state from the service it is given, so it is safe to leave out.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reopenServiceId, services]);
 
   useEffect(() => {
     // Category first, then the venue drag order: each category's services sit
@@ -448,7 +715,8 @@ export function AppointmentServicesView({
     setOrderedServiceIds(sorted.map((s) => s.id));
   }, [services, categoryFor]);
 
-  const canReorderServices = isAdmin && services.length > 1;
+  const canReorderServices =
+    isAdmin && services.length > 1 && collectiveFilter === 'all' && !(collective && !collective.isHost);
 
   const orderedVisibleServices = useMemo(() => {
     const byId = new Map(visibleServices.map((s) => [s.id, s]));
@@ -465,6 +733,41 @@ export function AppointmentServicesView({
    * than re-sorting, so an optimistic drag shows immediately.
    */
   const groupedVisibleServices = useMemo(() => {
+    if (collective && !collective.isHost) {
+      const roleOf = (svc: Service) => svc.collective?.role ?? 'parked';
+      const sections: Array<{ id: string | null; name: string; services: Service[]; caption?: string; collapsed?: boolean }> = [
+        {
+          id: 'from-host',
+          name: collectiveCopy('svc.member.section.fromHostTitle', { host: collective.hostVenueName }),
+          caption: collectiveCopy('svc.member.section.fromHostCaption', {
+            host: collective.hostVenueName,
+            collective: collective.name,
+          }),
+          services: visibleServices.filter((s) => roleOf(s) === 'replica'),
+        },
+        {
+          id: 'retired',
+          name: collectiveCopy('svc.member.section.retired', { host: collective.hostVenueName }),
+          caption: collectiveCopy('svc.member.section.retiredCaption', {
+            host: collective.hostVenueName,
+            collective: collective.name,
+          }),
+          collapsed: true,
+          services: visibleServices.filter((s) => roleOf(s) === 'retired'),
+        },
+        {
+          id: 'parked',
+          name: collectiveCopy('svc.member.section.parkedTitle', { collective: collective.name }),
+          caption: collectiveCopy('svc.member.section.parkedCaption', {
+            collective: collective.name,
+            host: collective.hostVenueName,
+          }),
+          services: visibleServices.filter((s) => roleOf(s) === 'parked'),
+        },
+      ];
+      return sections.filter((s) => s.services.length > 0);
+    }
+
     const buckets = new Map<string | null, Service[]>();
     for (const svc of orderedVisibleServices) {
       const key = svc.category_id && categoryFor(svc.category_id) ? svc.category_id : null;
@@ -472,7 +775,7 @@ export function AppointmentServicesView({
       if (bucket) bucket.push(svc);
       else buckets.set(key, [svc]);
     }
-    const groups: Array<{ id: string | null; name: string; services: Service[] }> = [];
+    const groups: Array<{ id: string | null; name: string; services: Service[]; caption?: string; collapsed?: boolean }> = [];
     for (const category of categories) {
       const bucket = buckets.get(category.id);
       if (bucket) groups.push({ id: category.id, name: category.name, services: bucket });
@@ -480,7 +783,7 @@ export function AppointmentServicesView({
     const rest = buckets.get(null);
     if (rest) groups.push({ id: null, name: groups.length > 0 ? UNCATEGORISED_GROUP_LABEL : '', services: rest });
     return groups;
-  }, [orderedVisibleServices, categories, categoryFor]);
+  }, [orderedVisibleServices, categories, categoryFor, collective, visibleServices]);
 
   const serviceCountByCategory = useMemo(() => {
     const counts = new Map<string, number>();
@@ -596,6 +899,7 @@ export function AppointmentServicesView({
   async function putCalendarServiceLinks(
     calendarId: string,
     serviceIds: string[],
+    expectedServiceIds: string[],
     acknowledge: boolean,
   ): Promise<'saved' | 'needs_confirmation'> {
     const res = await fetch(
@@ -605,14 +909,22 @@ export function AppointmentServicesView({
       {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ practitioner_id: calendarId, service_ids: serviceIds }),
+        body: JSON.stringify({
+          practitioner_id: calendarId,
+          service_ids: serviceIds,
+          expected_service_ids: expectedServiceIds,
+        }),
       },
     );
     if (res.ok) return 'saved';
     const data = (await res.json().catch(() => ({}))) as { error?: string };
+    if (res.status === 412) {
+      // Someone else changed this calendar's services: reload so the next attempt starts from theirs.
+      void fetchAll();
+    }
     const confirmation = res.status === 409 ? parseServiceRemovalConfirmation(data) : null;
     if (confirmation) {
-      openServiceRemoval({ kind: 'calendar_links', calendarId, serviceIds }, confirmation);
+      openServiceRemoval({ kind: 'calendar_links', calendarId, serviceIds, expectedServiceIds }, confirmation);
       return 'needs_confirmation';
     }
     throw new Error(data.error ?? 'Failed to update service allocation');
@@ -627,7 +939,7 @@ export function AppointmentServicesView({
       const nextServiceIds = nextEnabled
         ? Array.from(new Set([...baseline, serviceId]))
         : baseline.filter((id) => id !== serviceId);
-      if ((await putCalendarServiceLinks(calendarId, nextServiceIds, false)) === 'needs_confirmation') {
+      if ((await putCalendarServiceLinks(calendarId, nextServiceIds, explicit, false)) === 'needs_confirmation') {
         return;
       }
       await fetchAll();
@@ -672,7 +984,12 @@ export function AppointmentServicesView({
         }
       }
       if (pendingRemoval.kind === 'calendar_links') {
-        await putCalendarServiceLinks(pendingRemoval.calendarId, pendingRemoval.serviceIds, true);
+        await putCalendarServiceLinks(
+          pendingRemoval.calendarId,
+          pendingRemoval.serviceIds,
+          pendingRemoval.expectedServiceIds,
+          true,
+        );
       } else {
         await patchServicePayload(pendingRemoval.payload, true);
         setShowModal(false);
@@ -715,6 +1032,9 @@ export function AppointmentServicesView({
       practitioner_ids: defaultCalendarIds,
     });
     setEditingId(null);
+    setEditingBaseline(null);
+    setCollectiveCalendarsDiff(EMPTY_CALENDARS_VALUE);
+    setAddToPage(true);
     setError(null);
     setShowAddCalendarModal(false);
     setNewCalendarName('');
@@ -736,6 +1056,7 @@ export function AppointmentServicesView({
         (svc.deposit_pence != null && svc.deposit_pence > 0 ? 'deposit' : 'none'),
       colour: svc.colour || '#3B82F6',
       is_active: svc.is_active,
+      is_bookable_online: svc.is_bookable_online !== false,
       category_id: svc.category_id ?? null,
       practitioner_ids: svcLinks,
       staffMay: {
@@ -788,6 +1109,8 @@ export function AppointmentServicesView({
       online_meeting_info: svc.online_meeting_info ?? '',
     });
     setEditingId(svc.id);
+    setEditingBaseline({ updatedAt: svc.updated_at ?? null, calendarIds: svcLinks });
+    setCollectiveCalendarsDiff(EMPTY_CALENDARS_VALUE);
     setError(null);
     setShowAddCalendarModal(false);
     setNewCalendarName('');
@@ -857,6 +1180,45 @@ export function AppointmentServicesView({
    * partial body, so this sends the one field and shows the result at once,
    * rolling back if the save fails.
    */
+  /**
+   * Put a service on the collective page, or take it off (contract 1). The engine does the work at
+   * every venue; the page reloads to show what each venue now carries.
+   */
+  async function setOnPage(serviceId: string, offer: boolean, itemId: string | null): Promise<string | null> {
+    if (!collective) return null;
+    const res = offer
+      ? await fetch(`/api/venue/collectives/${collective.id}/offerings`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ service_id: serviceId }),
+        })
+      : await fetch(`/api/venue/collectives/${collective.id}/offerings/${itemId}`, { method: 'DELETE' });
+    if (res.ok) return null;
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    return data.error ?? 'That did not go through. Please try again.';
+  }
+
+  async function confirmOnPage() {
+    const ask = offerAsk;
+    setOfferAsk(null);
+    if (!ask) return;
+    setOfferBusy((prev) => new Set(prev).add(ask.svc.id));
+    setError(null);
+    try {
+      const failed = await setOnPage(ask.svc.id, ask.offer, ask.svc.collective?.item_id ?? null);
+      if (failed) setError(failed);
+      await fetchAll();
+    } catch {
+      setError('That did not go through. Please check your connection.');
+    } finally {
+      setOfferBusy((prev) => {
+        const next = new Set(prev);
+        next.delete(ask.svc.id);
+        return next;
+      });
+    }
+  }
+
   async function toggleServiceActive(svc: Service, nextActive: boolean) {
     if (activeToggling.has(svc.id)) return;
     setActiveToggling((prev) => new Set(prev).add(svc.id));
@@ -896,7 +1258,7 @@ export function AppointmentServicesView({
   async function patchServicePayload(
     payload: Record<string, unknown>,
     acknowledge: boolean,
-  ): Promise<'saved' | 'needs_confirmation'> {
+  ): Promise<{ outcome: 'saved'; body: Record<string, unknown> } | { outcome: 'needs_confirmation' | 'stale' }> {
     const res = await fetch(
       acknowledge
         ? '/api/venue/appointment-services?acknowledge_affected_bookings=true'
@@ -907,16 +1269,24 @@ export function AppointmentServicesView({
         body: JSON.stringify(payload),
       },
     );
-    if (res.ok) return 'saved';
+    if (res.ok) return { outcome: 'saved', body: (await res.json().catch(() => ({}))) as Record<string, unknown> };
 
     const data = (await res.json().catch(() => ({}))) as {
       error?: string;
+      code?: string;
       details?: unknown;
     };
+    // Someone else saved this service after the form opened (W2). The page asks before
+    // overwriting them, rather than reporting a failure the owner cannot act on.
+    if (res.status === 412 && data.code === 'STALE_RESOURCE') {
+      const svc = services.find((s) => s.id === editingId);
+      setStaleService({ id: editingId ?? '', name: svc?.name ?? 'This service' });
+      return { outcome: 'stale' };
+    }
     const confirmation = res.status === 409 ? parseServiceRemovalConfirmation(data) : null;
     if (confirmation) {
       openServiceRemoval({ kind: 'service_form', payload }, confirmation);
-      return 'needs_confirmation';
+      return { outcome: 'needs_confirmation' };
     }
     const baseMsg = data.error ?? 'Failed to save service';
     // `details` is a zod flatten() OBJECT, not a string. Typed as a string it
@@ -936,17 +1306,73 @@ export function AppointmentServicesView({
       setError(built.error);
       return;
     }
-    const { payload } = built;
+    const payload =
+      editingId && editingBaseline
+        ? {
+            ...built.payload,
+            ...(editingBaseline.updatedAt ? { expected_updated_at: editingBaseline.updatedAt } : {}),
+            expected_calendar_ids: editingBaseline.calendarIds,
+            // The host's calendar choices across the collective, as a diff (contract 4). Absent
+            // when nothing was ticked, so an ordinary save sends nothing new.
+            ...(editingCollectiveBlock &&
+            (collectiveCalendarsDiff.add.length > 0 || collectiveCalendarsDiff.remove.length > 0)
+              ? { collective_calendars: collectiveCalendarsDiff }
+              : {}),
+          }
+        : built.payload;
 
+    // Turning off a staff permission box clears the values calendars set under it: ask first.
+    if (editingId && isAdmin) {
+      const current = services.find((s) => s.id === editingId);
+      const clears = current
+        ? calendarValuesClearedByFlagChange({
+            before: current,
+            after: { ...current, ...payload },
+            links: links.filter((l) => l.service_id === editingId),
+            calendarName: (calendarId) => practitioners.find((p) => p.id === calendarId)?.name ?? 'A calendar',
+          })
+        : [];
+      if (clears.length > 0) {
+        setPendingFlagClear({ payload, clears });
+        return;
+      }
+    }
+
+    await saveServicePayload(payload);
+  }
+
+  async function saveServicePayload(payload: Record<string, unknown>) {
     setSaving(true);
     setError(null);
     try {
-      if ((await patchServicePayload(payload, false)) === 'needs_confirmation') {
-        // The service form closes so the two dialogs never stack; cancelling reopens it.
+      const result = await patchServicePayload(payload, false);
+      if (result.outcome !== 'saved') {
+        // Both answers put a dialog in front of the owner: the bookings a removal would leave
+        // behind, or the change someone else saved first. The form closes so they never stack,
+        // and cancelling reopens it.
         setShowModal(false);
         return;
       }
 
+      // A new service at a host goes on the page unless the host unticked the box. The service is
+      // saved either way; a refusal here is reported, never a reason to lose the service.
+      if (!editingId && collective?.isHost && addToPage) {
+        const createdId = typeof result.body.id === 'string' ? result.body.id : null;
+        if (createdId) {
+          const failed = await setOnPage(createdId, true, null);
+          if (failed) {
+            setError(
+              collectiveCopy('svc.offer.error', { service: String(payload.name ?? 'This service'), collective: collective.name }),
+            );
+          }
+        }
+      }
+
+      // How far the save reached, and the 60 second offer to put it back (D50). Absent at a
+      // venue that is not hosting a collective, which is every venue today.
+      const sync = (result.body.collective_sync ?? null) as CollectiveSync | null;
+      setCollectiveSave(sync ? { sync, serviceName: String(payload.name ?? 'This service') } : null);
+      setCollectiveCalendarsDiff(EMPTY_CALENDARS_VALUE);
       setShowModal(false);
       await fetchAll();
     } catch (err) {
@@ -1021,7 +1447,9 @@ export function AppointmentServicesView({
               ? linkedPractitionerIds.length === 0
                 ? 'Ask an admin to assign you to a calendar in Team settings before you can add services or manage offers.'
                 : 'Add services and link them only to calendars you control. Use Availability → Services to toggle which columns offer each service.'
-              : 'Define what guests can book, pricing, buffers, and online payment rules.'
+              : collective && !collective.isHost
+                ? collectiveCopy('svc.member.subtitle', { host: collective.hostVenueName })
+                : 'Define what guests can book, pricing, buffers, and online payment rules.'
             : activeTab === 'categories'
               ? 'Group your services under headings so customers find what they want faster, and set the order the headings appear in.'
               : isAdmin
@@ -1030,16 +1458,34 @@ export function AppointmentServicesView({
         }
         actions={
           showServicesTab && (isAdmin || linkedPractitionerIds.length > 0) ? (
-            <button
-              type="button"
-              onClick={openCreate}
-              className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
+            <div
+              className={`grid w-full gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center ${
+                isAdmin && collective?.isHost && collectiveMemberNames.length > 0 ? 'grid-cols-2' : 'grid-cols-1'
+              }`}
             >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path d="M12 5v14m-7-7h14" />
-              </svg>
-              Add service
-            </button>
+              {isAdmin && collective?.isHost && collectiveMemberNames.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddFromDone(null);
+                    setAddFromOpen(true);
+                  }}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-center text-sm font-semibold leading-tight text-slate-700 shadow-sm hover:bg-slate-50 sm:px-4"
+                >
+                  {collectiveCopy('svc.addFrom.button')}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={openCreate}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-3 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 sm:px-4"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path d="M12 5v14m-7-7h14" />
+                </svg>
+                Add service
+              </button>
+            </div>
           ) : null
         }
       />
@@ -1069,9 +1515,35 @@ export function AppointmentServicesView({
           uncategorisedCount={uncategorisedCount}
           isAdmin={isAdmin}
           onChange={setCategories}
+          collective={
+            collective
+              ? {
+                  name: collective.name,
+                  hostName: collective.hostVenueName,
+                  isHost: collective.isHost,
+                  venueList: formatVenueList(collectiveMemberNames, 3),
+                  onPageCountByCategory: onPageCountByCategory,
+                }
+              : null
+          }
         />
       ) : (
         <>
+      {collectiveSave && collective ? (
+        <div className="mb-4">
+          <CollectiveSaveSummary
+            sync={collectiveSave.sync}
+            serviceName={collectiveSave.serviceName}
+            collectiveId={collective.id}
+            venueNames={[...collectiveMemberNames]}
+            onUndone={() => {
+              setCollectiveSave(null);
+              void fetchAll();
+            }}
+          />
+        </div>
+      ) : null}
+
       {!showModal && error && (
         <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 flex items-center justify-between">
           <span>{error}</span>
@@ -1111,6 +1583,88 @@ export function AppointmentServicesView({
         </SectionCard>
       ) : (
         <div className="space-y-3">
+          {collectiveTodos.length > 0 ? (
+            <CollectiveTodoStrip
+              todos={collectiveTodos}
+              onOpenService={(serviceId) => {
+                const svc = services.find((s) => s.id === serviceId);
+                if (!svc) return;
+                if (isManagedByHost(svc)) {
+                  setViewingError(null);
+                  setViewingNeedsAck(false);
+                  setViewingService(svc);
+                  return;
+                }
+                openEdit(svc);
+              }}
+            />
+          ) : null}
+          {/* After leaving a collective, what to check (UX spec J7). Only when not in one now. */}
+          {isAdmin && !collective ? <ReleaseReviewCard /> : null}
+          {isAdmin && collective && !collective.isHost ? (
+            <AdoptionRequests
+              collectiveId={collective.id}
+              initialItemId={searchParams.get('adopt')}
+              onAnswered={() => void fetchAll()}
+            />
+          ) : null}
+          {suggestNote ? (
+            <p
+              role={suggestNote.tone === 'error' ? 'alert' : 'status'}
+              className={`rounded-xl border px-4 py-3 text-sm ${
+                suggestNote.tone === 'error'
+                  ? 'border-rose-200 bg-rose-50 text-rose-800'
+                  : 'border-emerald-200 bg-emerald-50 text-emerald-900'
+              }`}
+            >
+              {suggestNote.text}
+            </p>
+          ) : null}
+          {addFromDone ? (
+            <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+              {addFromDone}
+            </p>
+          ) : null}
+          {(addFromOpen || (addFromPreset && !addFromPresetUsed)) && collective?.isHost && isAdmin ? (
+            <AddFromVenueDialog
+              open
+              initialVenueId={addFromPresetUsed ? null : addFromPreset?.venueId ?? null}
+              initialServiceId={addFromPresetUsed ? null : addFromPreset?.serviceId ?? null}
+              onClose={() => {
+                setAddFromOpen(false);
+                setAddFromPresetUsed(true);
+              }}
+              collectiveId={collective.id}
+              collectiveName={collective.name}
+              venues={collectiveCalendars.filter((g) => !g.is_host).map((g) => ({ venue_id: g.venue_id, venue_name: g.venue_name }))}
+              formatPrice={(pence) => formatPrice(pence)}
+              onAdded={(message) => {
+                setAddFromOpen(false);
+                setAddFromPresetUsed(true);
+                setAddFromDone(message);
+                void fetchAll();
+              }}
+            />
+          ) : null}
+          {collective ? (
+            <CollectiveServicesBanner
+              variant={collective.isHost ? 'host' : 'member'}
+              collectiveName={collective.name}
+              hostVenueName={collective.hostVenueName}
+              memberNames={collectiveMemberNames}
+              invitedOnly={collective.isHost && collectiveMemberNames.length === 0}
+              behindVenueNames={collectiveBehindVenueNames}
+            />
+          ) : null}
+          {collective && collective.isHost ? (
+            <CollectiveServicesFilter
+              value={collectiveFilter}
+              onChange={setCollectiveFilter}
+              collectiveName={collective.name}
+              counts={collectiveFilterCounts}
+              reorderHidden={isAdmin && services.length > 1 && collectiveFilter !== 'all'}
+            />
+          ) : null}
           {canReorderServices ? (
             <p className="text-xs text-slate-500">
               Drag the handle (or use the arrows) to set the order services appear in on your public
@@ -1125,12 +1679,26 @@ export function AppointmentServicesView({
           {groupedVisibleServices.map((group) => (
           <section key={group.id ?? 'other'} aria-label={group.name || 'Services'} className="space-y-3">
             {group.name ? (
-              <div className="flex items-baseline justify-between gap-3 pt-2">
-                <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{group.name}</h2>
-                <span className="text-xs text-slate-400">
-                  {group.services.length} service{group.services.length === 1 ? '' : 's'}
-                </span>
-              </div>
+              group.collapsed ? (
+                // The host has taken these off the page: they keep their bookings and take no new
+                // ones, so they are here to be found, not to be read every day.
+                <details className="pt-2">
+                  <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    {group.name} ({group.services.length})
+                  </summary>
+                  {group.caption ? <p className="mt-1 text-xs text-slate-500">{group.caption}</p> : null}
+                </details>
+              ) : (
+                <div className="pt-2">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{group.name}</h2>
+                    <span className="text-xs text-slate-400">
+                      {group.services.length} service{group.services.length === 1 ? '' : 's'}
+                    </span>
+                  </div>
+                  {group.caption ? <p className="mt-1 text-xs text-slate-500">{group.caption}</p> : null}
+                </div>
+              )
             ) : null}
           <DndContext sensors={reorderSensors} collisionDetection={closestCenter} onDragEnd={onServiceDragEnd}>
             <SortableContext items={group.services.map((s) => s.id)} strategy={verticalListSortingStrategy}>
@@ -1164,7 +1732,7 @@ export function AppointmentServicesView({
                     ) : undefined
                   }
                   right={
-                    <div className="flex flex-wrap items-center justify-end gap-2">
+                    <div className="flex flex-wrap items-center justify-start gap-2 sm:justify-end">
                       {canReorderServices ? (
                         <span className="mr-1 flex items-center gap-1">
                           {dragHandle}
@@ -1216,10 +1784,14 @@ export function AppointmentServicesView({
                           Inactive
                         </Pill>
                       ) : null}
+                      {svc.collective ? <CollectiveServicePills block={svc.collective} /> : null}
+                      {isManagedByHost(svc) ? (
+                        <MemberServiceLine block={svc.collective!} paymentRequirement={svc.payment_requirement ?? null} />
+                      ) : null}
                     </div>
                   }
                 />
-                <SectionCard.Body className="!pt-0">
+                <SectionCard.Body className="!pt-3">
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0 flex-1 space-y-3">
                   <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
@@ -1352,6 +1924,11 @@ export function AppointmentServicesView({
                               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
                                 Offer on your calendars
                               </p>
+                              {svc.collective && svc.collective.role !== 'parked' ? (
+                                <p className="mb-2 text-xs text-slate-600">
+                                  {collectiveCopy('reach.staff.toggles', { collective: svc.collective.collective_name })}
+                                </p>
+                              ) : null}
                               <div className="space-y-2">
                                 {linkedPractitionerIds.map((calendarId) => {
                                   const calendar = practitioners.find((p) => p.id === calendarId);
@@ -1410,6 +1987,30 @@ export function AppointmentServicesView({
                           })}
                         </div>
                       )}
+                      {(() => {
+                        // A host's service on the page: the calendars at the other venues that offer it
+                        // too, so the card says everywhere it can be booked.
+                        const itemId = svc.collective?.role === 'master' ? svc.collective.item_id : null;
+                        if (!itemId) return null;
+                        const elsewhere = collectiveCalendars
+                          .filter((g) => !g.is_host)
+                          .flatMap((g) =>
+                            g.calendars
+                              .filter((cal) => cal.is_active && cal.assigned.some((a) => a.item_id === itemId))
+                              .map((cal) => ({ id: cal.id, name: cal.name, venue: g.venue_name })),
+                          );
+                        if (elsewhere.length === 0) return null;
+                        return (
+                          <div className="mt-1.5 flex flex-wrap gap-1" aria-label="Calendars at other venues">
+                            {elsewhere.map((cal) => (
+                              <Pill key={cal.id} variant="neutral" size="sm">
+                                {cal.name}
+                                <span className="ml-1 font-normal text-slate-500">({cal.venue})</span>
+                              </Pill>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </div>
 
                   {(isAdmin ||
@@ -1423,7 +2024,36 @@ export function AppointmentServicesView({
                         cover, and the active flag is not one of them, so their
                         switch would flip and then roll straight back.
                       */}
-                      {isAdmin ? (() => {
+                      {isAdmin && collective?.isHost && svc.collective && !isManagedByHost(svc) ? (() => {
+                        const onPage = svc.collective.role === 'master';
+                        const switchId = `service-on-page-${svc.id}`;
+                        return (
+                          <span className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              id={switchId}
+                              role="switch"
+                              aria-checked={onPage}
+                              aria-label={`${collectiveCopy('svc.card.onPageSwitch', { collective: collective.name })}: ${svc.name}`}
+                              disabled={offerBusy.has(svc.id)}
+                              onClick={() => setOfferAsk({ svc, offer: !onPage })}
+                              className={`relative h-5 w-9 shrink-0 rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 disabled:cursor-wait disabled:opacity-60 ${
+                                onPage ? 'bg-brand-600' : 'bg-slate-300'
+                              }`}
+                            >
+                              <span
+                                className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                                  onPage ? 'translate-x-4' : 'translate-x-0'
+                                }`}
+                              />
+                            </button>
+                            <label htmlFor={switchId} className="cursor-pointer select-none text-xs text-slate-600">
+                              {collectiveCopy('svc.card.onPageSwitch', { collective: collective.name })}
+                            </label>
+                          </span>
+                        );
+                      })() : null}
+                      {isAdmin && !isManagedByHost(svc) ? (() => {
                         const toggling = activeToggling.has(svc.id);
                         const switchId = `service-active-${svc.id}`;
                         return (
@@ -1447,13 +2077,37 @@ export function AppointmentServicesView({
                               />
                             </button>
                             <label htmlFor={switchId} className="cursor-pointer select-none text-xs text-slate-600">
-                              Active (visible to guests)
+                              {svc.collective?.role === 'parked'
+                                ? collectiveCopy('svc.card.activeParked', { collective: svc.collective.collective_name })
+                                : 'Active (visible to guests)'}
                             </label>
                           </span>
                         );
                       })() : null}
+                      {isAdmin && svc.collective?.role === 'parked' && collective ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSuggestNote(null);
+                            setSuggestAsk(svc);
+                          }}
+                          className="text-xs font-semibold text-brand-700 underline"
+                        >
+                          {collectiveCopy('svc.member.card.suggest', { host: collective.hostVenueName })}
+                        </button>
+                      ) : null}
                       <DashboardEntityRowActions
-                        onEdit={() => openEdit(svc)}
+                        onEdit={() => {
+                          if (isManagedByHost(svc)) {
+                            setViewingError(null);
+                            setViewingNeedsAck(false);
+                            setViewingService(svc);
+                            return;
+                          }
+                          openEdit(svc);
+                        }}
+                        showDelete={!isManagedByHost(svc)}
+                        editLabel={isManagedByHost(svc) ? collectiveCopy('svc.member.card.view') : 'Edit'}
                         onDelete={() => {
                           setDeleteServiceModalError(null);
                           setServiceToDelete({ id: svc.id, name: svc.name });
@@ -1501,6 +2155,44 @@ export function AppointmentServicesView({
               <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
             )}
 
+            {(() => {
+              // Where a save to this service reaches, said before anything is changed (UX spec 0.2).
+              const block = editingId ? services.find((x) => x.id === editingId)?.collective ?? null : null;
+              if (!block || (block.role !== 'master' && block.role !== 'parked')) return null;
+              return (
+                <div className="mb-4 rounded-lg border border-brand-200 bg-brand-50/50 px-3 py-2">
+                  <EditReachNote className="!mt-0">
+                    {block.role === 'master'
+                      ? collectiveCopy('reach.host.master', {
+                          collective: block.collective_name,
+                          venueList: formatVenueList(collectiveMemberNames) || 'every venue',
+                        })
+                      : collectiveCopy('reach.host.parked', { collective: block.collective_name })}
+                  </EditReachNote>
+                </div>
+              );
+            })()}
+
+            {!editingId && isAdmin && collective?.isHost ? (
+              <div className="mb-4 rounded-lg border border-brand-200 bg-brand-50/50 px-3 py-2">
+                <label className="flex items-center gap-2 text-sm font-medium text-slate-800">
+                  <input
+                    type="checkbox"
+                    checked={addToPage}
+                    onChange={(e) => setAddToPage(e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-600"
+                  />
+                  {collectiveCopy('svc.add.onPageCheckbox', { collective: collective.name })}
+                </label>
+                <p className="mt-1 text-xs text-slate-600">
+                  {collectiveCopy('svc.add.onPageHelp', {
+                    venueList: formatVenueList(collectiveMemberNames) || 'the other venues',
+                    collective: collective.name,
+                  })}
+                </p>
+              </div>
+            ) : null}
+
             <AppointmentServiceFormFields
               form={form}
               setForm={setForm}
@@ -1509,12 +2201,36 @@ export function AppointmentServicesView({
               currencySymbol={sym}
               fieldGroupSuffix={editingId ?? 'new-service'}
               categories={categories}
+              collectiveName={collective?.name ?? null}
+              collectiveNameLocked={Boolean(editingCollectiveBlock)}
+              collectiveVenueNames={editingCollectiveBlock ? collectiveMemberNames : []}
               venueOpeningHours={venueOpeningHours}
               venueOpeningExceptions={venueOpeningExceptions}
               venueWideBlocks={venueWideBlocks}
               linkedCalendarsForPreview={linkedCalendarsForPreview}
               calendarsSection={
-                calendarsForServiceForm.length > 0 ||
+                editingCollectiveBlock ? (
+                  <CollectiveCalendarsSection
+                    groups={collectiveCalendars}
+                    itemId={editingCollectiveBlock.item_id}
+                    collectiveName={editingCollectiveBlock.collective_name}
+                    currencySymbol={sym}
+                    value={collectiveCalendarsDiff}
+                    onChange={setCollectiveCalendarsDiff}
+                    hiddenReasons={editingCollectiveBlock.hidden_reasons}
+                    defaults={{
+                      durationMinutes: Number.isFinite(Number(form.duration_minutes)) ? Number(form.duration_minutes) : null,
+                      bufferMinutes: Number.isFinite(Number(form.buffer_minutes)) ? Number(form.buffer_minutes) : null,
+                      pricePence: form.price.trim() !== '' && Number.isFinite(Number(form.price)) ? Math.round(Number(form.price) * 100) : null,
+                      depositPence:
+                        form.payment_requirement !== 'deposit'
+                          ? 0
+                          : form.deposit.trim() !== '' && Number.isFinite(Number(form.deposit))
+                            ? Math.round(Number(form.deposit) * 100)
+                            : null,
+                    }}
+                  />
+                ) : calendarsForServiceForm.length > 0 ||
                 lingeringCalendarLinks.length > 0 ||
                 practitioners.length === 0 ? (
                   <div>
@@ -1698,6 +2414,239 @@ export function AppointmentServicesView({
 
 
 
+      <Dialog
+        open={pendingFlagClear !== null}
+        onOpenChange={(open) => {
+          if (!open && !saving) setPendingFlagClear(null);
+        }}
+        title="Clear calendars' own values?"
+        description="You are turning off permission for staff to set their own values for this service. These calendars set their own, and they will be cleared so each calendar uses the service's values."
+        size="sm"
+        footer={
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              loading={saving}
+              disabled={saving}
+              onClick={() => {
+                const pending = pendingFlagClear;
+                setPendingFlagClear(null);
+                if (pending) void saveServicePayload(pending.payload);
+              }}
+            >
+              Clear and save
+            </Button>
+            <Button type="button" variant="secondary" disabled={saving} onClick={() => setPendingFlagClear(null)}>
+              Go back
+            </Button>
+          </div>
+        }
+      >
+        <ul className="space-y-1 text-sm text-slate-700" data-testid="flag-clear-list">
+          {(pendingFlagClear?.clears ?? []).map((c) => (
+            <li key={c.calendarId}>
+              <span className="font-medium text-slate-900">{c.calendarName}</span>: {joinFieldLabels(c.fields)}
+            </li>
+          ))}
+        </ul>
+      </Dialog>
+
+      <Dialog
+        open={staleService !== null}
+        onOpenChange={(open) => {
+          if (!open) setStaleService(null);
+        }}
+        title={collectiveCopy('svc.stale.title', { service: staleService?.name })}
+        description={collectiveCopy('svc.stale.message', { service: staleService?.name })}
+        size="sm"
+        footer={
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              onClick={() => {
+                const id = staleService?.id ?? null;
+                setStaleService(null);
+                setReopenServiceId(id);
+                void fetchAll();
+              }}
+            >
+              {collectiveCopy('svc.stale.confirm')}
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => setStaleService(null)}>
+              Go back
+            </Button>
+          </div>
+        }
+      >
+        <p className="sr-only">{collectiveCopy('svc.stale.message', { service: staleService?.name })}</p>
+      </Dialog>
+
+      {viewingService && viewingService.collective ? (
+        <MemberServiceView
+          open
+          onClose={() => {
+            setViewingNeedsAck(false);
+            setViewingService(null);
+          }}
+          service={{
+            ...viewingService,
+            compliance_type_names: complianceTypeNamesByService.get(viewingService.id) ?? [],
+            addon_groups: (viewingService.addon_groups ?? []).map((entry) => ({
+              group: { id: entry.group.id, name: entry.group.name },
+            })),
+          }}
+          block={viewingService.collective}
+          currencySymbol={sym}
+          saving={saving}
+          error={viewingError}
+          confirmRemoval={viewingNeedsAck}
+          calendars={allocatableCalendars
+            .map((p) => ({
+              id: p.id,
+              name: p.name,
+              is_active: p.is_active,
+              offers: calendarOffersService(p.id, viewingService.id),
+            }))}
+          onSave={(values) => {
+            const service = viewingService;
+            const acknowledge = viewingNeedsAck;
+            void (async () => {
+              setSaving(true);
+              setViewingError(null);
+              try {
+                const res = await fetch(
+                  acknowledge
+                    ? '/api/venue/appointment-services?acknowledge_affected_bookings=true'
+                    : '/api/venue/appointment-services',
+                  {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    id: service.id,
+                    practitioner_ids: values.practitioner_ids,
+                    expected_calendar_ids: links
+                      .filter((l) => l.service_id === service.id)
+                      .map((l) => l.practitioner_id),
+                    ...(service.location_type === 'online'
+                      ? {
+                          online_meeting_url: values.online_meeting_url ?? '',
+                          online_meeting_info: values.online_meeting_info ?? '',
+                        }
+                      : {}),
+                    // Only when changed: a calendar-only save sends nothing else.
+                    ...((values.pre_appointment_instructions ?? '') !==
+                    ((service as { pre_appointment_instructions?: string | null }).pre_appointment_instructions ?? '')
+                      ? { pre_appointment_instructions: values.pre_appointment_instructions ?? '' }
+                      : {}),
+                  }),
+                  },
+                );
+                if (!res.ok) {
+                  const data = (await res.json().catch(() => ({}))) as {
+                    error?: string;
+                    message?: string;
+                    requires_confirmation?: boolean;
+                  };
+                  if (res.status === 409 && data.requires_confirmation) {
+                    setViewingNeedsAck(true);
+                    setViewingError(
+                      data.message ??
+                        data.error ??
+                        'Some upcoming bookings are already booked for this service on this calendar. They are kept.',
+                    );
+                    return;
+                  }
+                  setViewingNeedsAck(false);
+                  setViewingError(data.error ?? 'Could not save your settings. Please try again.');
+                  return;
+                }
+                setViewingNeedsAck(false);
+                setViewingService(null);
+                await fetchAll();
+              } catch {
+                setViewingError('Could not save your settings. Please check your connection.');
+              } finally {
+                setSaving(false);
+              }
+            })();
+          }}
+        />
+      ) : null}
+
+      <ConfirmDialog
+        open={suggestAsk !== null}
+        onOpenChange={(open) => {
+          if (!open) setSuggestAsk(null);
+        }}
+        title={
+          suggestAsk && collective
+            ? collectiveCopy('svc.member.suggest.title', { service: suggestAsk.name, collective: collective.name })
+            : ''
+        }
+        message={
+          suggestAsk && collective
+            ? collectiveCopy('svc.member.suggest.message', {
+                host: collective.hostVenueName,
+                service: suggestAsk.name,
+                collective: collective.name,
+              })
+            : ''
+        }
+        confirmLabel={collectiveCopy('svc.member.suggest.confirm')}
+        onConfirm={() => {
+          const ask = suggestAsk;
+          setSuggestAsk(null);
+          if (!ask || !collective) return;
+          void (async () => {
+            try {
+              const res = await fetch(`/api/venue/collectives/${collective.id}/suggestions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ service_id: ask.id }),
+              });
+              if (!res.ok) {
+                const data = (await res.json().catch(() => ({}))) as { error?: string };
+                setSuggestNote({ tone: 'error', text: data.error ?? 'Could not send the suggestion. Please try again.' });
+                return;
+              }
+              setSuggestNote({
+                tone: 'ok',
+                text: collectiveCopy('svc.member.suggest.done', { host: collective.hostVenueName }),
+              });
+            } catch {
+              setSuggestNote({ tone: 'error', text: 'Could not send the suggestion. Please check your connection.' });
+            }
+          })();
+        }}
+      />
+
+      <ConfirmDialog
+        open={offerAsk !== null}
+        onOpenChange={(open) => {
+          if (!open) setOfferAsk(null);
+        }}
+        destructive={offerAsk?.offer === false}
+        title={
+          offerAsk && collective
+            ? collectiveCopy(offerAsk.offer ? 'svc.offer.title' : 'svc.withdraw.title', {
+                service: offerAsk.svc.name,
+                collective: collective.name,
+              })
+            : ''
+        }
+        message={
+          offerAsk && collective
+            ? collectiveCopy(offerAsk.offer ? 'svc.offer.message' : 'svc.withdraw.message', {
+                service: offerAsk.svc.name,
+                collective: collective.name,
+                venueList: formatVenueList(collectiveMemberNames) || 'the other venues',
+              })
+            : ''
+        }
+        confirmLabel={collectiveCopy(offerAsk?.offer === false ? 'svc.withdraw.confirm' : 'svc.offer.confirm')}
+        onConfirm={() => void confirmOnPage()}
+      />
+
       <ServiceRemovalBookingsDialog
         open={serviceRemoval !== null}
         confirmation={serviceRemoval}
@@ -1785,6 +2734,16 @@ export function AppointmentServicesView({
           selectedCalendarId={overrideCalendarId ?? linkedPractitionerIds[0]}
           onSelectedCalendarChange={setOverrideCalendarId}
           currency={currency}
+          collective={
+            overrideService.collective && overrideService.collective.role !== 'parked'
+              ? {
+                  hostName: overrideService.collective.host_venue_name,
+                  // Only the host's own staff read the venue name, and at the host it is this venue.
+                  venueName: overrideService.collective.host_venue_name,
+                  isMember: overrideService.collective.role !== 'master',
+                }
+              : null
+          }
         />
       )}
     </div>

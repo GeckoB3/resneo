@@ -319,6 +319,8 @@ Verified safe: `linked_apply_booking_update` writes a fixed column list excludin
 
 ### C8. Non-admin staff can move any booking onto a colleague's calendar
 
+> **SUPERSEDED BY THE OWNER, 2026-09-17.** The owner ruled that staff work bookings like an admin at their own venue: they move bookings between any calendars, and their assigned calendars limit only hours, closures and service settings. The own-venue check below, and the matching ones on validate, check-in and the visit routes, were removed on staging (`src/app/api/venue/bookings/staff-calendar-scope.guard.test.ts` pins the rule). The cross-venue leg (the account link's calendar scope) stays.
+
 > **STATUS — IMPLEMENTED ON STAGING, 2026-08-14.** Only the own-venue non-admin leg was written, since the cross-venue leg was already live (see the correction below the fix snippet). It sits inside the existing `if (body.practitioner_id && isAppointment)` block, ahead of the §18 check, and calls `requireManagedCalendarAccess` with the message the fix text specifies.
 >
 > Both traps the rewritten fix warns about are avoided by construction and the reasons are now in the code: it is inside that block so `practitioner_id` is always present (`requireManagedCalendarAccess` fails closed on a null calendar id **before** its admin bypass, so hoisting it would 403 every status change, note edit and deposit edit for every role), and it is gated on `isOwnVenue` because `scopeVenueId` is the owner venue where a partner's staff hold no calendars at all. Shape mirrors `validate-appointment-modification/route.ts:71-88`, which already gates the same field.

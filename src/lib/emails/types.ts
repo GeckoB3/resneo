@@ -140,6 +140,8 @@ export interface BookingEmailData {
    * complete" block in the confirmation. Renders only when non-empty.
    */
   compliance_forms?: Array<{ name: string; url: string }>;
+  /** The collective page the booking was made through (UX spec `email.confirm.through`). */
+  booked_through?: string | null;
   /** Sum of add-on price (pence) for the booking; used in totals/headlines. */
   addons_total_price_pence?: number | null;
   /** Sum of add-on duration (minutes); informational. */

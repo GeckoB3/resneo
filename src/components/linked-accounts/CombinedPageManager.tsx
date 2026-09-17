@@ -8,9 +8,11 @@
  * its solo-page behaviour (D2).
  */
 
+import Link from 'next/link';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, btnPrimary, btnSecondary, btnDanger } from './linked-accounts-ui';
 import { collectivePublicPath, collectivePublicUrl } from '@/lib/linked-accounts/collective-public-url';
+import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 import { type BookingPageConfig } from '@/lib/booking/booking-page-theme';
 import { BookingPageEditor } from '@/components/booking-page-editor/BookingPageEditor';
 import { BookOpeningHours } from '@/components/booking/BookOpeningHours';
@@ -663,13 +665,16 @@ export function CombinedPageManagerPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- settings/action are stable enough; rebuild on the data deps below
   }, [collective, isHost, busy, logoUrl, coverUrl, importSources, pageServices, pageTeam, patchCollective, uploadPageAsset, getPageConfig, savePageConfig]);
 
-  const tabs: { key: TabKey; label: string }[] = isHost
-    ? [
-        { key: 'page', label: 'Page' },
-        { key: 'services', label: 'Services & calendars' },
-        { key: 'members', label: 'Members' },
-      ]
-    : [];
+  const sharedServices = collective.serviceModel === 'replicas';
+  const tabs: { key: TabKey; label: string }[] = !isHost
+    ? []
+    : sharedServices
+      ? [{ key: 'page', label: 'Page' }]
+      : [
+          { key: 'page', label: 'Page' },
+          { key: 'services', label: 'Services & calendars' },
+          { key: 'members', label: 'Members' },
+        ];
 
     const pendingLabel =
     pendingCount > 0 ? `${pendingCount} unsaved calendar change${pendingCount === 1 ? '' : 's'}` : null;
@@ -712,7 +717,8 @@ export function CombinedPageManagerPanel({
 
         {tab === 'page' && isHost ? (
           <div className="space-y-3">
-            <div aria-live="polite" className="h-4 text-xs">
+            {sharedServices ? <SharedServicesPointer /> : null}
+            <div aria-live="polite" className="h-4 text-right text-xs">
               {pageSave.status === 'saving' ? (
                 <span className="text-amber-600">Saving…</span>
               ) : pageSave.status === 'saved' ? (
@@ -725,7 +731,7 @@ export function CombinedPageManagerPanel({
           </div>
         ) : null}
 
-        {tab === 'members' && isHost ? (
+        {tab === 'members' && isHost && !sharedServices ? (
           <MembersSection
             collective={collective}
             eligibleLinks={eligibleLinks}
@@ -735,7 +741,7 @@ export function CombinedPageManagerPanel({
           />
         ) : null}
 
-        {tab === 'services' && isHost ? (
+        {tab === 'services' && isHost && !sharedServices ? (
           loading ? (
             <div className="space-y-2" aria-busy="true">
               <span className="sr-only">Loading the catalogue…</span>
@@ -794,7 +800,9 @@ export function CombinedPageManagerPanel({
       title={`Combined booking page: ${collective.name}`}
       description={
         isHost
-          ? 'Your combined page works like a single venue. Set it up here: design, services & calendars, and members.'
+          ? collective.serviceModel === 'replicas'
+            ? COMBINED_PAGE_DESCRIPTION_SHARED
+            : COMBINED_PAGE_DESCRIPTION_LEGACY
           : 'This combined page is managed by the host venue.'
       }
       footer={
@@ -933,14 +941,26 @@ export function CombinedPageMemberSummary({
   return (
     <div className="space-y-5" data-testid="combined-page-member-summary">
       <p className="text-sm text-slate-600">
-        {host} hosts {collective.name} and manages its combined booking page: the services on it, which
-        calendars are offered, its headings, photos and branding. Your services appear there with the
-        price, length and availability set under your own Services settings.
+        {collective.serviceModel === 'replicas' ? (
+          <>
+            {host} hosts {collective.name} and manages its booking page and the services on it, with their
+            prices, lengths, deposits, options and forms, for every venue. You choose which of your
+            calendars offer each one on your Services page, and your own hours and closures decide when
+            they are free.
+          </>
+        ) : (
+          <>
+            {host} hosts {collective.name} and manages its combined booking page: the services on it, which
+            calendars are offered, its headings, photos and branding. Your services appear there with the
+            price, length and availability set under your own Services settings.
+          </>
+        )}
       </p>
       <section className="space-y-2 rounded-xl border border-slate-200 p-4">
         <p className="text-sm font-bold text-slate-900">Combined page address</p>
         <p className="text-xs text-slate-500">This is the page to send your guests to.</p>
         <CombinedPageAddressRow collective={collective} />
+        <AddressAdoptionAsk collective={collective} host={host} />
       </section>
       <CombinedPageAboutSection collective={collective} />
       <section className="space-y-2 rounded-xl border border-slate-200 p-4">
@@ -982,6 +1002,70 @@ export function CombinedPageMemberSummary({
   );
 }
 
+/**
+ * The host's request to use this venue's page address, waiting for this member's admin (§6.9, N38).
+ * Nothing changes unless they agree.
+ */
+export function AddressAdoptionAsk({ collective, host }: { collective: CollectiveView; host: string }) {
+  const [answer, setAnswer] = useState<'adopted' | 'declined' | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!collective.pendingAdoptedVenueId || collective.pendingAdoptedVenueId !== collective.myVenueId) return null;
+  if (answer) {
+    return (
+      <p role="status" className="text-sm text-slate-700">
+        {answer === 'adopted'
+          ? `The ${collective.name} page now uses your page address.`
+          : `Your page address stays as it is.`}
+      </p>
+    );
+  }
+  const ownSlug = collective.members.find((m) => m.venueId === collective.myVenueId)?.venueSlug ?? null;
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const send = async (accept: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/venue/collectives/${collective.id}/address-adoption`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accept }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(json.error ?? 'Could not save your answer. Please try again.');
+      setAnswer(accept ? 'adopted' : 'declined');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save your answer. Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div data-testid="address-adoption-ask" className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
+      <p className="text-sm text-amber-950">
+        {collectiveCopy('bp.address.adopt.ask', {
+          host,
+          collective: collective.name,
+          ownAddress: ownSlug ? `${origin}/book/${ownSlug}` : 'your page address',
+        })}
+      </p>
+      {error ? (
+        <p role="alert" className="text-sm text-rose-700">
+          {error}
+        </p>
+      ) : null}
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={btnPrimary} disabled={busy} onClick={() => void send(true)}>
+          {collectiveCopy('bp.address.adopt.confirm')}
+        </button>
+        <button type="button" className={btnSecondary} disabled={busy} onClick={() => void send(false)}>
+          {collectiveCopy('bp.address.adopt.decline')}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Booking page address (host): the combined page works like one venue
 // ---------------------------------------------------------------------------
@@ -995,10 +1079,15 @@ function PageAddressSection({
   busy: boolean;
   onSettings: (body: Record<string, unknown>) => Promise<boolean>;
 }) {
-  const adopt = collective.slugStrategy === 'adopt_member';
-  const adoptedSlug = adopt
+  const pendingId = collective.pendingAdoptedVenueId ?? null;
+  const adopted = collective.slugStrategy === 'adopt_member';
+  // A member's address waits for its admin (§6.9): the picker shows the request, the page keeps
+  // its current address until they agree.
+  const adopt = adopted || Boolean(pendingId);
+  const adoptedSlug = adopted
     ? (collective.members.find((m) => m.venueId === collective.adoptedVenueId)?.venueSlug ?? null)
     : null;
+  const pendingName = pendingId ? (collective.members.find((m) => m.venueId === pendingId)?.venueName ?? 'That venue') : null;
   return (
     <section className="space-y-2 rounded-xl border border-slate-200 p-4">
       <p className="text-sm font-bold text-slate-900">Booking page address</p>
@@ -1039,7 +1128,7 @@ function PageAddressSection({
           <select
             className={inputCls}
             disabled={busy}
-            value={collective.adoptedVenueId ?? ''}
+            value={pendingId ?? collective.adoptedVenueId ?? ''}
             onChange={(e) =>
               void onSettings({ slugStrategy: 'adopt_member', adoptedVenueId: e.target.value })
             }
@@ -1052,7 +1141,15 @@ function PageAddressSection({
                 </option>
               ))}
           </select>
-          {adoptedSlug ? (
+          {pendingName ? (
+            <p data-testid="address-adoption-pending" className="mt-1 text-xs text-slate-700">
+              {collectiveCopy('bp.address.adopt.pending', {
+                venue: pendingName,
+                collective: collective.name,
+                collectiveAddress: collectivePublicPath(collective),
+              })}
+            </p>
+          ) : adoptedSlug ? (
             <p className="mt-1 text-xs text-slate-600">
               Customers reach it at <code className="text-xs">/book/{adoptedSlug}</code>.
             </p>
@@ -1189,6 +1286,28 @@ function hostVenueName(collective: CollectiveView): string {
   );
 }
 
+export const COMBINED_PAGE_DESCRIPTION_LEGACY =
+  'Your combined page works like a single venue. Set it up here: design, services & calendars, and members.';
+export const COMBINED_PAGE_DESCRIPTION_SHARED =
+  'Your combined page works like a single venue. Set up how it looks here.';
+
+/** Shared services: where the services, calendars and venues of the page are managed now. */
+function SharedServicesPointer() {
+  return (
+    <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+      The services on the page and the calendars that offer them are chosen on your{' '}
+      <Link href="/dashboard/appointment-services" className="font-medium text-brand-700 underline underline-offset-2">
+        Services
+      </Link>{' '}
+      page. Venues, invitations and hosting are in{' '}
+      <Link href="/dashboard/collective" className="font-medium text-brand-700 underline underline-offset-2">
+        Manage Collective
+      </Link>
+      .
+    </p>
+  );
+}
+
 /**
  * The combined page has no settings of its own for the things below: it works
  * like one venue and follows the HOST venue. Say so, because a host looking for
@@ -1213,11 +1332,20 @@ function HostInheritedSettingsNote({ collective }: { collective: CollectiveView 
         <li>Address, phone and website shown in the header: Settings, Profile. Opening hours: Settings, Business hours.</li>
         <li>Currency and wording (for example &ldquo;appointment&rdquo;): Settings, Profile.</li>
       </ul>
-      <p className="text-xs text-slate-600">
-        Prices, durations, deposits and cancellation notice come from each member venue&rsquo;s own
-        service, because every booking is made with that venue. If any member requires customers to
-        sign in to book, the combined page asks them to sign in too.
-      </p>
+      {collective.serviceModel === 'replicas' ? (
+        <p className="text-xs text-slate-600">
+          The services on the page, with their prices, lengths, deposits, options, add-ons and forms, are
+          {' '}{host}&rsquo;s, and apply at every venue. Guests are asked to sign in only when {host} asks for
+          it: Settings, Booking settings. Each booking, its payment and the client record belong to the
+          venue the guest books with.
+        </p>
+      ) : (
+        <p className="text-xs text-slate-600">
+          Prices, durations, deposits and cancellation notice come from each member venue&rsquo;s own
+          service, because every booking is made with that venue. If any member requires customers to
+          sign in to book, the combined page asks them to sign in too.
+        </p>
+      )}
     </section>
   );
 }

@@ -8,6 +8,9 @@ vi.mock('@/lib/linked-accounts/collectives', () => ({
   },
 }));
 
+// The older model: the shared-services resolver has no view of these venues.
+vi.mock('@/lib/linked-accounts/replicas/page-handover', () => ({ resolveOwnPageHandover: async () => null }));
+
 import { resolveVenueBookingPageUrl } from './venue-booking-page-link';
 
 const admin = {} as never;

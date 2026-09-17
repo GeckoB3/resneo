@@ -78,20 +78,22 @@ async function calendarOffersServiceItem(
 }
 
 /**
- * PATCH - staff only. Upsert per-practitioner overrides for one service (price, duration, etc.)
- * when the venue admin has enabled the matching staff_may_customize_* flags on the service.
+ * PATCH - a calendar's own values for one service: name, description, length, buffer, price,
+ * deposit and colour (W8, D4, D5).
+ *
+ * Who may set them (D4): a staff member on a calendar they manage, for each field whose
+ * `staff_may_customize_*` flag is on; or one of the venue's admins, on any calendar at the venue,
+ * whatever the flags say. `null` clears a value back to the service's own.
+ *
+ * Every venue is on unified scheduling, so values are stored on `calendar_service_assignments`.
+ * Before migration 20270214140000 only length and price had storage there and the other five were
+ * refused or silently dropped (PB-01). The legacy branch below is kept for the old model only.
  */
 export async function PATCH(request: NextRequest) {
   try {
     const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-    if (staff.role === 'admin') {
-      return NextResponse.json(
-        { error: 'Use the Services page or admin tools to edit venue-wide settings.' },
-        { status: 403 },
-      );
-    }
 
     const body = await request.json();
     const parsed = patchSchema.safeParse(body);
@@ -101,12 +103,35 @@ export async function PATCH(request: NextRequest) {
 
     const { service_id, calendar_id: calendarIdOpt, ...rawPatch } = parsed.data;
     const admin = getSupabaseAdminClient();
+    const isAdmin = staff.role === 'admin';
 
     const useUnified = await venueUsesUnifiedAppointmentServiceData(admin, staff.venue_id);
 
+    if (!useUnified && isAdmin) {
+      return NextResponse.json(
+        { error: 'Use the Services page or admin tools to edit venue-wide settings.' },
+        { status: 403 },
+      );
+    }
+
     if (useUnified) {
       let calendarId: string;
-      if (calendarIdOpt) {
+      if (isAdmin) {
+        // D4: an admin chooses the calendar, which must be one of this venue's.
+        if (!calendarIdOpt) {
+          return NextResponse.json({ error: 'Choose which calendar to update (calendar_id).' }, { status: 400 });
+        }
+        const { data: cal } = await admin
+          .from('unified_calendars')
+          .select('id')
+          .eq('id', calendarIdOpt)
+          .eq('venue_id', staff.venue_id)
+          .maybeSingle();
+        if (!cal) {
+          return NextResponse.json({ error: 'That calendar is not part of your venue.' }, { status: 403 });
+        }
+        calendarId = calendarIdOpt;
+      } else if (calendarIdOpt) {
         const access = await requireManagedCalendarAccess(
           admin,
           staff.venue_id,
@@ -143,8 +168,8 @@ export async function PATCH(request: NextRequest) {
 
       const { data: svc, error: svcErr } = await admin
         .from('service_items')
-        // The staff_may_customize_* flags are the whole authorisation model for
-        // this route; selecting only `id` is what let the gate below go missing.
+        // The staff_may_customize_* flags are the whole authorisation model for staff on this
+        // route; selecting only `id` is what once let the gate go missing.
         .select('*')
         .eq('id', service_id)
         .eq('venue_id', staff.venue_id)
@@ -156,36 +181,52 @@ export async function PATCH(request: NextRequest) {
 
       const unifiedService = svc as AppointmentService;
 
-      /**
-       * Enforce the per-field permissions, exactly as the legacy branch below
-       * does. This branch previously allow-listed COLUMN NAMES only and never
-       * loaded the flags, so any staff account could rewrite a service's price
-       * or duration on its calendar even where the admin had deliberately turned
-       * customisation off. The dashboard hides those inputs, but the route is
-       * reachable directly and runs on the service-role client, so there was no
-       * RLS backstop. Every venue is on unified scheduling, which made the
-       * enforced branch the dead one.
-       */
       const updates: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(rawPatch)) {
         if (value === undefined) continue;
-        if (key !== 'custom_duration_minutes' && key !== 'custom_price_pence') continue;
         const perm = OVERRIDE_TO_PERMISSION[key];
-        if (!perm || !Boolean(unifiedService[perm])) {
+        if (!perm) continue;
+        if (!isAdmin && !Boolean(unifiedService[perm])) {
           return NextResponse.json(
             { error: `You are not allowed to customise this field for this service (${key}).` },
             { status: 403 },
           );
         }
-        updates[key] = value;
+        updates[key] = typeof value === 'string' && key === 'custom_name' ? value.trim() : value;
       }
 
       if (Object.keys(updates).length === 0) {
+        return NextResponse.json({ error: 'No values to update.' }, { status: 400 });
+      }
+      if (updates.custom_name === '') {
         return NextResponse.json(
-          { error: 'No valid fields to update (unified scheduling supports duration and price overrides only).' },
+          { error: 'Enter a name, or clear it to use the service name.' },
           { status: 400 },
         );
       }
+
+      // On a card-hold service a calendar's deposit is its no-show fee, with the same 1.00 floor as
+      // the service's own fee. Null clears it back to the service fee and stays allowed.
+      if (
+        unifiedService.payment_requirement === 'card_hold' &&
+        typeof updates.custom_deposit_pence === 'number' &&
+        updates.custom_deposit_pence < 100
+      ) {
+        return NextResponse.json(
+          { error: 'Set a no-show fee of at least £1, or leave it blank to use the service fee.' },
+          { status: 400 },
+        );
+      }
+
+      // "Last changed by". Best effort: a session that cannot be read must not lose the save.
+      let userId: string | null = null;
+      try {
+        const { data: userData } = await supabase.auth.getUser();
+        userId = userData?.user?.id ?? null;
+      } catch {
+        userId = null;
+      }
+      const stamp = { updated_by_venue_id: staff.venue_id, updated_by_user_id: userId };
 
       const { data: existing, error: exErr } = await admin
         .from('calendar_service_assignments')
@@ -199,18 +240,10 @@ export async function PATCH(request: NextRequest) {
         return NextResponse.json({ error: 'Failed to load link' }, { status: 500 });
       }
 
-      const useUpdates: Record<string, unknown> = {};
-      if (updates.custom_duration_minutes !== undefined) {
-        useUpdates.custom_duration_minutes = updates.custom_duration_minutes;
-      }
-      if (updates.custom_price_pence !== undefined) {
-        useUpdates.custom_price_pence = updates.custom_price_pence;
-      }
-
       if (existing?.id) {
         const { error: upErr } = await admin
           .from('calendar_service_assignments')
-          .update(useUpdates)
+          .update({ ...updates, ...stamp })
           .eq('id', existing.id);
         if (upErr) {
           console.error('PATCH practitioner-service-overrides (USE) update:', upErr);
@@ -220,7 +253,8 @@ export async function PATCH(request: NextRequest) {
         const { error: insErr } = await admin.from('calendar_service_assignments').insert({
           calendar_id: calendarId,
           service_item_id: service_id,
-          ...useUpdates,
+          ...updates,
+          ...stamp,
         });
         if (insErr) {
           console.error('PATCH practitioner-service-overrides (USE) insert:', insErr);

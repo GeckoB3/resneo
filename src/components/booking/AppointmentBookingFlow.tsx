@@ -33,6 +33,7 @@ import type { ProcessingTimeBlock } from '@/types/booking-models';
 import { minutesToTime, timeToMinutes } from '@/lib/availability';
 import { MultiServiceSummaryCard } from './MultiServiceSummaryCard';
 import { MultiServicePickerBar, type PickerServiceLine } from './MultiServicePickerBar';
+import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 import {
   MAX_SERVICES_PER_VISIT,
   chainSpanMinutes,
@@ -497,6 +498,10 @@ function StaffCustomDurationPopover({
 interface CatalogPractitioner {
   id: string;
   name: string;
+  /** Collective page: the member venue that owns this calendar, and its address (PUB-03). */
+  owning_venue_id?: string;
+  owning_venue_name?: string;
+  owning_venue_address?: string;
   services: Array<{
     id: string;
     name: string;
@@ -1185,6 +1190,8 @@ export function AppointmentBookingFlow({
     card_hold_requested?: boolean;
     /** Unmet requirements flagged at staff booking time (audit M2; staff are never blocked, plan §5). */
     compliance_warnings?: StaffComplianceWarning[];
+    /** D47: the same person looks booked at another venue of the collective at this time. */
+    same_person_warning?: string;
   } | null>(null);
   /** Server-verified payment outcome (plan Phase 5): drives honest confirmation copy. */
   const [paymentOutcome, setPaymentOutcome] = useState<ConfirmOutcome | null>(null);
@@ -2063,6 +2070,8 @@ export function AppointmentBookingFlow({
         description: string | null;
         duration_minutes: number;
         minPricePence: number | null;
+        /** Calendars charge different prices for it, so the list says "From". */
+        priceVaries?: boolean;
         sortOrder: number;
         /** Same value as `sortOrder`, under the name the category grouping reads. */
         sort_order: number;
@@ -2071,17 +2080,20 @@ export function AppointmentBookingFlow({
         assigned?: boolean;
       }
     >();
+    const firstPrice = new Map<string, number | null>();
     for (const p of catalogStaff) {
       for (const s of p.services) {
         const price = s.price_pence;
         const existing = map.get(s.id);
         if (!existing) {
+          firstPrice.set(s.id, price ?? null);
           map.set(s.id, {
             id: s.id,
             name: s.name,
             description: s.description?.trim() ? s.description.trim() : null,
             duration_minutes: s.duration_minutes,
             minPricePence: price,
+            priceVaries: false,
             sortOrder: s.sort_order ?? 0,
             sort_order: s.sort_order ?? 0,
             category: s.category ?? null,
@@ -2091,6 +2103,7 @@ export function AppointmentBookingFlow({
           if (!existing.description && s.description?.trim()) {
             existing.description = s.description.trim();
           }
+          if ((price ?? null) !== (firstPrice.get(s.id) ?? null)) existing.priceVaries = true;
           if (price != null && (existing.minPricePence == null || price < existing.minPricePence)) {
             existing.minPricePence = price;
           }
@@ -2152,6 +2165,19 @@ export function AppointmentBookingFlow({
     const wanted = [selectedServiceId, ...chainExtras.map((e) => e.serviceId)];
     return catalogStaff.filter((p) => wanted.every((id) => p.services.some((s) => s.id === id)));
   }, [catalogStaff, selectedServiceId, chainExtras]);
+
+  /**
+   * Collective page: the venue under each person's name (UX spec `public.calendar.venue`), unless
+   * the name already carries it because two people share a name.
+   */
+  const calendarVenueLine = useCallback(
+    (prac: { name: string; owning_venue_name?: string }): string | null => {
+      const venueName = prac.owning_venue_name?.trim();
+      if (!venue.is_collective || !venueName || prac.name.endsWith(`· ${venueName}`)) return null;
+      return collectiveCopy('public.calendar.venue', { venue: venueName });
+    },
+    [venue.is_collective],
+  );
 
   /** Everyone the staff-first picker offers; empty calendars are already excluded upstream. */
   const bookableStaff = useMemo(
@@ -2296,6 +2322,11 @@ export function AppointmentBookingFlow({
     return formatFromBookablePricePence(pence, sym);
   }
 
+  /** "From" only when the price really differs: across calendars, or across the service's options. */
+  function formatListPrice(svc: { minPricePence: number | null; priceVaries?: boolean }, hasVariants: boolean): string {
+    return !hasVariants && svc.priceVaries === false ? formatPrice(svc.minPricePence) : formatFromPrice(svc.minPricePence);
+  }
+
   const phoneDefaultCountry = defaultPhoneCountryForVenueCurrency(venue.currency);
 
   // Single flow helpers (names/prices from catalog; slots from availability API)
@@ -2325,6 +2356,19 @@ export function AppointmentBookingFlow({
    * these lookups are practitioner-scoped (empty until a calendar is picked).
    */
   const isCombined = Boolean(venue.is_collective);
+  /**
+   * Collective page: a group shares one venue, one contact and one payment (D28), so people booked
+   * with calendars at different venues cannot go on together. Said before the details step.
+   */
+  const groupSpansVenues = useMemo(() => {
+    if (!isCombined || groupPeople.length < 2) return false;
+    const venues = new Set(
+      groupPeople
+        .map((p) => catalogStaff.find((c) => c.id === p.practitionerId)?.owning_venue_id ?? null)
+        .filter((v): v is string => Boolean(v)),
+    );
+    return venues.size > 1;
+  }, [isCombined, groupPeople, catalogStaff]);
 
   /**
    * Whose catalogue the extra services' options come from: the chosen person
@@ -2517,7 +2561,21 @@ export function AppointmentBookingFlow({
   }, []);
 
   /** Continue from the picker: the first tick leads, the rest follow as extras. */
+  /**
+   * On a collective page, the ticked services no one calendar offers together (BM-06). A visit is
+   * one person, so one venue; the picker says so and does not move on, rather than finding no
+   * times later.
+   */
+  const pickerSpansVenues = useMemo(() => {
+    if (!isCombined || pendingServiceIds.length < 2) return false;
+    const listed = new Set(serviceListForStep.map((svc) => svc.id));
+    const ids = pendingServiceIds.filter((id) => listed.has(id));
+    if (ids.length < 2) return false;
+    return !catalogStaff.some((p) => ids.every((id) => p.services.some((s) => s.id === id)));
+  }, [isCombined, pendingServiceIds, serviceListForStep, catalogStaff]);
+
   const continueFromServicePicker = useCallback(() => {
+    if (pickerSpansVenues) return;
     const listed = new Set(serviceListForStep.map((svc) => svc.id));
     const ids = pendingServiceIds.filter((id) => listed.has(id));
     const first = ids[0];
@@ -2526,7 +2584,7 @@ export function AppointmentBookingFlow({
     setChainExtras(extras);
     setChainAddonIds([]);
     chooseServiceAndAdvance(first, extras);
-  }, [chooseServiceAndAdvance, pendingServiceIds, serviceListForStep]);
+  }, [chooseServiceAndAdvance, pendingServiceIds, serviceListForStep, pickerSpansVenues]);
 
   const toggleGroupPendingService = useCallback((serviceId: string) => {
     setGroupPendingServiceIds((prev) =>
@@ -2762,6 +2820,24 @@ export function AppointmentBookingFlow({
     () => (assignedPractitionerId ? catalogStaff.find((p) => p.id === assignedPractitionerId) ?? null : null),
     [assignedPractitionerId, catalogStaff],
   );
+
+  /**
+   * Collective page: the business the guest is booking with, once the calendar is known (PUB-03,
+   * RT2-14). The page is one venue to look at, but the booking, the payment and the client record
+   * belong to that member.
+   */
+  const tradingVenue = useMemo(() => {
+    if (!isCombined || !assignedPractitioner?.owning_venue_name?.trim()) return null;
+    return {
+      name: assignedPractitioner.owning_venue_name.trim(),
+      address: assignedPractitioner.owning_venue_address?.trim() || null,
+    };
+  }, [isCombined, assignedPractitioner]);
+  const traderLine = tradingVenue
+    ? tradingVenue.address
+      ? collectiveCopy('public.trader', { business: tradingVenue.name, address: tradingVenue.address })
+      : collectiveCopy('public.traderNoAddress', { business: tradingVenue.name })
+    : null;
 
   /** Staff member for this visit after a time is chosen (especially “any available”). */
   const assignedStaffDisplayName = useMemo(() => {
@@ -3605,6 +3681,8 @@ export function AppointmentBookingFlow({
             payment_url: data.payment_url,
             card_hold_requested: Boolean(staffCardHold && staffRequireCardHold && data.payment_url),
             compliance_warnings: Array.isArray(data.compliance_warnings) ? data.compliance_warnings : undefined,
+            same_person_warning:
+              typeof data.same_person_warning?.message === 'string' ? data.same_person_warning.message : undefined,
           });
           setStep('confirmation');
           staffFlowStartedAtRef.current = Date.now();
@@ -4572,7 +4650,7 @@ export function AppointmentBookingFlow({
                                 across their options, or across the whole team. */}
                             {isStaffFirst && staffFirstServices && !serviceHasVariants
                               ? formatPrice(svc.minPricePence)
-                              : formatFromPrice(svc.minPricePence)}
+                              : formatListPrice(svc, serviceHasVariants)}
                           </span>
                           {pickerSelected ? (
                             <span className="ap-pick-check inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-600 text-white" aria-hidden>
@@ -4683,7 +4761,9 @@ export function AppointmentBookingFlow({
                         onClick={navigateFromServiceRow}
                         className="flex flex-shrink-0 items-center gap-2 border-l border-slate-100 bg-white py-3.5 pl-3 pr-3 text-left transition-colors hover:bg-slate-50/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500/40"
                       >
-                        <span className="text-sm font-semibold text-brand-600">{formatFromPrice(svc.minPricePence)}</span>
+                        <span className="text-sm font-semibold text-brand-600">
+                          {formatListPrice(svc, serviceHasVariants)}
+                        </span>
                         <svg className="h-4 w-4 flex-shrink-0 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden="true">
                           <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
                         </svg>
@@ -4716,6 +4796,11 @@ export function AppointmentBookingFlow({
               />
             </div>
           )}
+          {pickerSpansVenues ? (
+            <p role="alert" className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              {collectiveCopy('bm.visit.sameVenue')}
+            </p>
+          ) : null}
           {!isEdit && !catalogLoading && serviceListForStep.length > 0 ? (
             <MultiServicePickerBar
               services={pendingPickerLines}
@@ -5280,7 +5365,11 @@ export function AppointmentBookingFlow({
           {selectedService && (
             <div className="mb-4 flex items-center gap-3 rounded-xl border border-brand-100 bg-brand-50/50 px-4 py-2.5">
               <svg className="h-5 w-5 flex-shrink-0 text-brand-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
-              <div className="text-sm"><span className="font-medium text-brand-700">{selectedService.name}</span><span className="text-brand-500"> &middot; {(serviceSelectionDurationMinutes ?? selectedService.duration_minutes) + selectedAddonSummary.totalMinutes} min &middot; {selectedVariant ? formatPrice(priceWithSelectedAddons(selectedVariant.price_pence)) : formatFromPrice(priceWithSelectedAddons(servicesWithFromPrice.find((s) => s.id === selectedService.id)?.minPricePence ?? selectedService.price_pence))}{addonCountSuffix(selectedAddonSummary.lines.length)}</span></div>
+              <div className="text-sm"><span className="font-medium text-brand-700">{selectedService.name}</span><span className="text-brand-500"> &middot; {(serviceSelectionDurationMinutes ?? selectedService.duration_minutes) + selectedAddonSummary.totalMinutes} min &middot; {selectedVariant ? formatPrice(priceWithSelectedAddons(selectedVariant.price_pence)) : (() => {
+                const listed = servicesWithFromPrice.find((s) => s.id === selectedService.id);
+                const pence = priceWithSelectedAddons(listed?.minPricePence ?? selectedService.price_pence);
+                return listed && !serviceHasVariants && listed.priceVaries === false ? formatPrice(pence) : formatFromPrice(pence);
+              })()}{addonCountSuffix(selectedAddonSummary.lines.length)}</span></div>
             </div>
           )}
           {anyRouteActive ? (
@@ -5390,6 +5479,9 @@ export function AppointmentBookingFlow({
                         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-100 text-sm font-bold text-brand-700">{prac.name.charAt(0).toUpperCase()}</div>
                         <div className="min-w-0">
                           <div className="font-medium text-slate-900">{prac.name}</div>
+                          {calendarVenueLine(prac) ? (
+                            <div className="mt-0.5 text-xs text-slate-500">{calendarVenueLine(prac)}</div>
+                          ) : null}
                           {availabilityOverride &&
                           prac.services.find((s) => s.id === selectedServiceId)?.assigned === false ? (
                             <div className="mt-0.5 text-[11px] font-semibold text-amber-800">
@@ -5444,6 +5536,11 @@ export function AppointmentBookingFlow({
                   </>
                 ) : null}
               </div>
+              {traderLine ? (
+                <p data-testid="slot-trader-line" className="ap-context-muted mt-1 text-xs">
+                  {traderLine}
+                </p>
+              ) : null}
             </AppointmentSummaryStrip>
           ) : (
             <div className="mb-4 rounded-xl border border-brand-100 bg-brand-50/50 px-4 py-2.5 text-sm">
@@ -5990,6 +6087,9 @@ export function AppointmentBookingFlow({
           ) : (
             <>
             <DetailsStep
+              contactScope={collectiveId && !isPublicGuest ? 'collective' : 'venue'}
+              traderLine={isPublicGuest ? traderLine : null}
+              marketingBusiness={isPublicGuest && isCombined ? tradingVenue?.name ?? venue.name : null}
               slot={{ key: selectedTime, label: selectedTime, start_time: selectedTime, end_time: '', available_covers: 1 }}
               date={date}
               partySize={1}
@@ -6081,6 +6181,11 @@ export function AppointmentBookingFlow({
         </div>
       )}
 
+      {step === 'payment' && createResult?.client_secret && isPublicGuest && tradingVenue ? (
+        <p data-testid="payment-payee" className="mb-3 text-sm font-medium text-slate-700">
+          {collectiveCopy('public.payment.payee', { business: tradingVenue.name })}
+        </p>
+      ) : null}
       {step === 'payment' && createResult?.client_secret && (
         <PaymentStep
           clientSecret={createResult.client_secret}
@@ -6122,6 +6227,11 @@ export function AppointmentBookingFlow({
           </h2>
           {paymentOutcome === 'processing' || paymentOutcome === 'unconfirmed' ? (
             <p className="mt-2 text-sm text-brand-700">{PAYMENT_PROCESSING_BODY}</p>
+          ) : null}
+          {isPublicGuest && tradingVenue ? (
+            <p data-testid="confirmation-through" className="mt-2 text-sm text-brand-800">
+              {collectiveCopy('public.confirmation.through', { business: tradingVenue.name, collective: venue.name })}
+            </p>
           ) : null}
           {multiServiceSegments && multiServiceSegments.length > 1 ? (
             <div className="mt-3 space-y-2 text-left text-sm text-brand-800">
@@ -6178,6 +6288,14 @@ export function AppointmentBookingFlow({
           ) : !isEdit && isPublicGuest && !isCardHoldPaymentMode(createResult?.payment_mode) ? (
             <p className="mt-4 max-w-sm mx-auto text-left text-xs text-brand-800/90">
               No deposit was taken. You can cancel or change this booking at any time before your appointment (subject to the venue&apos;s terms).
+            </p>
+          ) : null}
+          {isStaff && createResult?.same_person_warning ? (
+            <p
+              role="status"
+              className="mx-auto mt-4 max-w-sm rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left text-sm text-amber-900"
+            >
+              {createResult.same_person_warning}
             </p>
           ) : null}
           {isStaff ? (
@@ -6298,6 +6416,11 @@ export function AppointmentBookingFlow({
             </button>
           )}
 
+          {groupSpansVenues ? (
+            <p role="alert" className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              {collectiveCopy('public.group.sameVenue')}
+            </p>
+          ) : null}
           {/* Continue to details */}
           {groupPeople.length >= 1 && (
             <div className="mt-4 flex gap-3">
@@ -6309,7 +6432,8 @@ export function AppointmentBookingFlow({
               </button>
               <button
                 onClick={() => void advanceToGroupDetails()}
-                className="flex-1 rounded-xl bg-brand-600 px-4 py-3 text-sm font-medium text-white hover:bg-brand-700 shadow-sm"
+                disabled={groupSpansVenues}
+                className="flex-1 rounded-xl bg-brand-600 px-4 py-3 text-sm font-medium text-white hover:bg-brand-700 shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Continue to details
               </button>
@@ -6462,7 +6586,7 @@ export function AppointmentBookingFlow({
                         {isStaffFirst && groupStaffFirstServices &&
                         catalogVariantsForServiceFromStaff(catalogStaff, svc.id, groupPractitionerId).length === 0
                           ? formatPrice(svc.minPricePence)
-                          : formatFromPrice(svc.minPricePence)}
+                          : formatListPrice(svc, catalogVariantsForServiceId(catalogStaff, svc.id).length > 0)}
                       </span>
                       {groupPendingServiceIds.includes(svc.id) ? (
                         <span className="ap-pick-check inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-600 text-white" aria-hidden>
@@ -6974,6 +7098,8 @@ export function AppointmentBookingFlow({
                 );
               })()}
               <DetailsStep
+                contactScope={collectiveId && !isPublicGuest ? 'collective' : 'venue'}
+                marketingBusiness={isPublicGuest && isCombined ? tradingVenue?.name ?? venue.name : null}
                 slot={{ key: 'group', label: 'Group', start_time: groupPeople[0]?.time ?? '', end_time: '', available_covers: 1 }}
                 date={groupPeople[0]?.date ?? date}
                 partySize={groupPeople.length}

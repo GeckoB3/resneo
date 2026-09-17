@@ -65,6 +65,16 @@ Primary use cases:
 The feature is built on one rule: **each venue remains the sovereign owner of its own data.
 Linking is a relationship, not a merge.**
 
+> **Amended 2026-09-17 (venue collectives on shared services).** A venue collective (§7) is now
+> more than a combined page: on the shared-services model (`venue_collectives.service_model =
+> 'replicas'`) the collective works as one business. The host venue owns one set of services
+> for every venue, members hold locked copies of them, and each venue keeps its own calendars,
+> clients, bookings and payments. A collective is extra functionality on top of full-access
+> account links and never creates, changes or ends a link (D41 in
+> `Docs/collective-one-venue-plan.md`). The older model, where each venue kept its own services
+> and the page linked them (§7.7.2, §7.7.3), is the **legacy (service copies) model**, and it
+> stays in force for each collective until that collective is migrated.
+
 ---
 
 ## 2. Core principles
@@ -88,6 +98,25 @@ These principles govern every design decision. Any future change must preserve a
    `events` log).
 6. **Permissions are explicit and granular.** Defaults are sensible but every dimension is
    independently controllable, per direction.
+
+**Amended 2026-09-17: how a shared-services collective fits these principles.**
+
+- **Principle 1 has one deliberate exception.** In a collective on the shared-services model, the
+  host's service definitions are written into each member's account: a replica `service_items`
+  row with its options, heading, add-on groups and forms, plus the host's choices of which member
+  calendars offer it (`calendar_service_assignments`). Only the collective engine writes them
+  (audited `SECURITY DEFINER` functions run by the service role), and database triggers refuse
+  anyone else's change to them while the collective is live (`Docs/Multi_model_RLS_and_API_audit.md`).
+  Bookings, guests, payments and compliance records are still never copied: they belong to the
+  venue that took the booking, before, during and after membership.
+- **Principles 2 and 4 are about links, and a collective does not change them (D41).** Joining
+  requires full-access links between every pair of venues. Leaving, removal, dissolving, host
+  transfer and migration never create, narrow or end a link, so what a venue can see of another
+  venue's clients and bookings after it leaves is exactly what its links grant. Ending or
+  narrowing a link below full access still removes that venue from the collective.
+- **Leaving is lossless (D52).** When a membership ends, the services the host set up in that
+  venue stay as ordinary services the venue owns, with their settings, calendar choices and
+  bookings. Nothing is deleted or retired at release.
 
 ---
 
@@ -720,6 +749,50 @@ collective page is supplementary, served by the existing `BookPublicBookingFlow`
 (reused, as the embed route already does — see `Embed_Public_Booking_URL_Contract.md`) fed
 with a multi-venue dataset.
 
+**Amended 2026-09-17: two service models.** The paragraphs above describe the legacy (service
+copies) model. `venue_collectives.service_model` says which model a collective runs:
+
+| Value | Meaning |
+|---|---|
+| `legacy_copies` | The legacy model: each venue offers its own services, and the page links them through offerings and provider rows (§7.7.2, §7.7.3). The column default. |
+| `migrating` | Set only while `scripts/collective-replicas-migrate.mjs` moves a collective over (migration `20270218220000`). |
+| `replicas` | Shared services, the design going forward (`Docs/collective-one-venue-plan.md`, `Docs/collective-one-venue-ux-spec.md`; migrations `20270215120000` to `20270218220000`). |
+
+Existing collectives stay on `legacy_copies` until each one is migrated by the script, one
+collective at a time, after a signed dry run (D21, D54). New collectives start on the model
+the platform console names (D37, built 2026-09-17): `platform_settings.new_collective_service_model`
+(migration `20270218230000`), changed under **Collectives** on the console and audited as
+`collectives.new_service_model`, read by `POST /api/venue/collectives`. It ships as
+`legacy_copies`, and a read failure also gives `legacy_copies`; switching it to `replicas` is the
+plan's §8.2 "Flag" step and the owner's call.
+
+On shared services the collective is one business with one menu:
+
+- **The host owns the services.** The host's own `service_items` row (the master) is what the
+  page sells. Putting a service on the page (`collective_offer_service`) sets up a locked replica
+  in every member venue, and every later save of the master reaches every member through the
+  engine. Name and description are one everywhere (D29): the engine forces the two staff naming
+  flags off on an offered service. Calendars may vary price, length, buffer, deposit and colour
+  only where the host's `staff_may_customize_*` flags allow it (D4, D27, D56).
+- **Venues offer only the collective's services while live (D2 as revised 2026-09-14).** Every
+  other appointment service at the host or a member is *parked*: not bookable for a new booking
+  in any staff form, diary, walk-in flow or public page. Parking is derived from state, never
+  stored (`collective_bookable_service_ids`, migration `20270217120000`), and a database trigger
+  refuses a new booking on a parked service (RN007, `COLLECTIVE_SERVICE_PARKED`). Existing
+  bookings on a parked service stay fully manageable. A member can suggest a parked service to
+  the host (`POST /api/venue/collectives/{id}/suggestions`), and the host can add a service only
+  a member has ("Add from another venue").
+- **A service marked "Staff bookings only"** (`is_bookable_online = false`, host-controlled) can
+  be booked by every venue's team but is not shown on the collective page.
+- **Every venue's own page hands over to the collective page (D3).** While the collective is live
+  and at least one of the venue's calendars is listed on the page (for a member, also once every
+  one of its replicas is up to date), guests who open the venue's own appointment links are sent
+  to the collective page. Otherwise the own page shows and the Booking Page tab says why
+  (`resolveOwnPageHandover`, `src/lib/linked-accounts/replicas/page-handover.ts`). A venue that
+  also runs classes, events or bookable rooms keeps its own page for those. On the legacy model
+  a member's own page keeps its stored `solo_page_behavior` choice until the collective migrates.
+- **The collective page is appointments only (D44)** and can be embedded at `/embed/c/{slug}`.
+
 ### 7.2 Eligibility to form or join
 
 Every (prospective) member must:
@@ -733,6 +806,23 @@ Every (prospective) member must:
 The Admin creating the collective must be Admin on the host venue. Invitations go to each
 invitee's `venues.email` and active Admins, and must be accepted by an Admin on the invitee
 venue.
+
+**Amended 2026-09-17: the gate as built.** `checkCombinedEligibility`
+(`src/lib/linked-accounts/catalogue.ts`) is stricter than the first bullet list says. Every pair
+of venues must hold links granting full calendar detail **and** "Create, edit and cancel
+bookings" in both directions, with no calendar limits, and every venue must use the same
+timezone and the same currency as the host. On top of that, create, invite and accept refuse:
+
+- a venue already in another live collective, as host or member (D18,
+  `COLLECTIVE_VENUE_IN_OTHER_COLLECTIVE`);
+- a venue that does not offer appointments (D44).
+
+While a venue is in a collective it cannot change its timezone or currency, or switch
+appointments off (`src/lib/linked-accounts/collective-venue-locks.ts`). On shared services,
+joining needs the consent shown in the web join dialog (`join.consent`, version
+`join-2026-09`), which names the own-page hand-over, the host managing the services, and that
+the venues can see each other's clients, bookings and takings through their account links
+(D49). The app's one-tap accept answers `409 COLLECTIVE_CONSENT_REQUIRED` on this model.
 
 **Render-time eligibility re-check (shipped 2026-06-04).** Membership eligibility is not just an
 entry gate — it is re-evaluated on **every public page render**. `loadPublicCollective` excludes
@@ -764,6 +854,26 @@ and when the underlying link actually ends.
    `allow_any_practitioner_substitution`, and `display_order`.
 5. Once ≥ 2 members are `active`, `/book/c/{slug}` goes live.
 
+**Amended 2026-09-17: the flow as built.** Creation is the four-step **Create a collective**
+wizard (`CreateCollectiveDialog.tsx`): what a collective is, name and address, the venues to
+invite (every linked venue is listed with its standing from
+`GET /api/venue/collectives/candidates`, including why a venue cannot join), and a confirmation.
+Step 4 above (members choosing visible calendars and services) belongs to the legacy model. On
+shared services the invitee's admin opens the **Join** dialog (`GET
+/api/venue/collectives/{id}/join`) and answers, in one engine call (`collective_join_member`):
+
+- for each of its services with the same name as one of the host's: use its own service (which
+  keeps its calendars and bookings and takes the host's settings) or add the host's as a new
+  service (D1, the default);
+- for each other appointment service: park it while in the collective (the default) or ask the
+  host to add it (D2);
+- for its existing forms, whether to use them for the host's matching forms;
+- the consent described in §7.2.
+
+An invitation not answered in 30 days closes (`collective_close_invitation`, reason `expired`),
+with a reminder on day 7; the host can withdraw one (DL8). The page is live once the collective
+is active, has at least two eligible venues and at least one bookable service.
+
 ### 7.4 Host responsibilities and transfer
 
 The host venue controls `name`, `slug`, `branding`, `service_grouping`, member removal, and
@@ -783,6 +893,37 @@ tiebreak) whenever the current host is no longer an active member, provided ≥2
 involuntary one cannot block on a removed host's input. The new host is emailed
 (`notifyCollectiveHostTransferred`). The check is idempotent and self-heals any collective left
 orphaned by an earlier reconcile.
+
+**Amended 2026-09-17: the host on shared services.** Everything above is the legacy model. On
+shared services the host controls, in addition, every attribute of the services on the page
+(R4), which calendars at any venue offer them (`POST /api/venue/collectives/{id}/calendars`, the
+only path that writes another venue's calendar assignments), and each calendar's own values
+within the service's flags (`PUT .../calendar-values`). A save to a service on the page can be
+put back within 60 seconds (`POST .../undo`, D50). The host's venue-level booking settings
+apply to the whole page while the collective is live (D32): guest self-reschedule, the waitlist,
+"Any available" (and its order) and the staff-first flow come from the host's resolved feature
+flags (`loadCollectiveVenuePublic`). Communication policies, SMS and in-person payments stay with
+each venue. Guest sign-in follows the host's setting alone (D32, built 2026-09-17,
+`replicas/collective-sign-in.ts`): the page and all three create routes use it for a booking the
+server resolved through the collective. The older model keeps its rule until migrated: the page
+asks for sign-in when any venue with calendars on it requires it, and each create route enforces
+the owning venue's own setting.
+
+Host changes on this model are engine calls, and the legacy `transfer_host` action, which wrote
+`host_venue_id` directly, is refused (a trigger refuses any other writer, RN005):
+
+- **Asking a member to host (D12).** The host asks one active member (`offer_host`); the member
+  accepts with the consent it was shown (`accept_host`) or declines; either side can cancel.
+  Hosting moves 14 days after acceptance, which is every venue's window to leave first
+  (migration `20270218120000`).
+- **The host's subscription lapses or its membership ends through a link change (D22, D35).**
+  The collective is paused (`paused_at`), not dissolved: members stay locked and in step, may
+  leave, or may take over hosting at once with consent (`take_over_hosting`). A collective paused
+  for 30 days is dissolved by the verifier.
+- **Ending the collective.** The host ends it with `DELETE /api/venue/collectives/{id}`, which on
+  this model runs `collective_dissolve`: every venue is released with its services (§7.5), and for
+  90 days `/book/c/{slug}` shows a neutral page listing the former venues that chose to be listed
+  (D25). The host cannot leave; it hands over or ends the collective.
 
 ### 7.5 Membership changes and link dependencies
 
@@ -814,6 +955,28 @@ reduced below full mutual visibility:
 This cascade is re-checked both on link-change events and on every public page render, since
 RLS will already have cut off the data.
 
+**Amended 2026-09-17: membership changes on shared services.**
+
+- **Leave, removal and a broken link release the venue** through the engine
+  (`collective_release_member`, `src/lib/linked-accounts/replicas/release-actions.ts`), in one
+  transaction: the venue's replica links are released, the locks lift, its managed headings,
+  add-on groups and forms become its own, and any adoption of its page address is cleared.
+  Released services stay exactly as they are, as ordinary services the venue owns (D52); a
+  released service that takes payment is set to no online payment only when the venue cannot
+  take charges. Parked services are bookable again at once, and the venue's own page comes back.
+  After commit a follow-up copies the page photos into the venue and shows a short review. A
+  reconcile on this model releases with reason `link_ended` and never writes during a page
+  render.
+- **No account link is touched (D41).** Removal happens because a link fell below full access;
+  the reverse never happens, and `no-account-link-writes.test.ts` guards it.
+- **Subscription lapse (D22).** A member whose subscription lapses is suspended
+  (`suspended_at`, set by the suspension cron): its calendars leave the page and its own page
+  shows, while its replicas stay locked and in step. A member suspended for 30 days is released.
+- **Below two venues.** A collective left with one venue ends as the system (`below_two`), but
+  waits while an open invitation could bring it back to two, as the legacy reconcile does.
+- **Venue deletion** releases a member, or dissolves the collective for a host, before anything
+  else is deleted (migration `20270218160000`).
+
 ### 7.6 "Any practitioner" routing
 
 > **As built (superseding the original design below).** There is no collective-level
@@ -832,6 +995,13 @@ RLS will already have cut off the data.
 > written by the members API, but has no create/edit UI (§16.2).
 >
 > See §15.6 for the deviation record, including the host-coupling caveat.
+>
+> **Amended 2026-09-17.** D32 made the host coupling the intended rule: the host runs the page, so
+> its "Any available" setting applies, including a calendar order it chose. Calendars the host's
+> order does not name, which is every member calendar unless the host listed them, share
+> contested times by a stable spread over the date and time, so no venue takes them all
+> (`src/lib/linked-accounts/collective-any-available.ts`). "Any available" across venues for
+> services with options or add-ons is deferred (D24).
 
 The original design, retained for context: when `allow_any_practitioner` is on at the collective
 level and a member opts in per service (`allow_any_practitioner_substitution`), the page offers
@@ -848,6 +1018,31 @@ There is no "collective-level booking". A booking routed through the collective 
 existing `booking_source` enum value `'online'` and may record the collective via a nullable
 `bookings.collective_id` column if attribution reporting is wanted (optional; decide at
 Phase 2 build).
+
+**Amended 2026-09-17.**
+
+- **Attribution is `bookings.collective_id` (D55).** `source` gets no collective value; a
+  collective-page booking keeps `booking_page`. Booked revenue, the bookings list with its
+  "Booked through" filter, and the bookings export read `collective_id`, and reports name each
+  venue in its own row rather than blending them (D49).
+- **Who the guest books with.** The page names the venue each person works at, and the guest
+  sees "You are booking with" that venue before paying. Payment goes to that venue's own Stripe
+  account (D8); on shared services a calendar at a venue without charges-capable Stripe is not
+  offered for a paid service.
+- **Price.** Every appointment booking stores `service_price_snapshot_pence`, so a later host
+  price change does not reprice existing bookings.
+- **Moving a booking to another venue (D46, revised 2026-09-16).** Staff can move a plain
+  booking to a calendar at another venue in the same live collective with
+  `POST /api/venue/bookings/{id}/move-venue` (`collective_move_booking`, migrations
+  `20270218200000` and `20270218210000`, which cover both service models). The other venue gets
+  its own booking (its service, option, add-ons and client record, at the time and price
+  booked), the original is cancelled without a message, and the client gets one change message
+  from the new venue. A booking with a deposit, card hold, payment or completed form, or that is
+  part of a visit or a group, stays where it is and the refusal says why
+  (`COLLECTIVE_MOVE_ATTACHED`). Ownership still never moves: the result is a new booking owned by
+  the new venue.
+- **One client record per venue (D42).** The same person booking at two venues has a record at
+  each, and the two cannot be merged. This is explained in the help centre only.
 
 ### 7.7.1 Combined-page fixes shipped 2026-09-03
 
@@ -870,6 +1065,13 @@ Phase 2 build).
   meta description, and the editor states which settings follow the host venue.
 
 ### 7.7.2 Cross-venue service copies are exact (shipped 2026-09-06)
+
+> **Legacy model only (note 2026-09-17).** §7.7.2 and §7.7.3 describe the legacy (service copies)
+> model and apply to a collective until it is migrated. On shared services the engine writes
+> locked replicas from the column registry (`collective_column_classes`) and every host-controlled
+> field follows the host, price, deposit, description, add-ons and forms included; the catalogue's
+> sync and link actions do nothing there (`sync.state` is always `none`, and unlink answers
+> `409 COLLECTIVE_REPLICAS_ALWAYS_FOLLOW`).
 
 When the host ticks a calendar in a venue that does not offer an offering's service, the
 service is duplicated into that venue (`service-duplication.ts`). The copy used to carry
@@ -920,6 +1122,15 @@ offering reuses an existing same-named service unchanged. See `Docs/collective-s
 Collective branding applies only to `/book/c/{slug}` and to confirmation communications for
 bookings made through that page. Each venue's own booking page and comms keep their own
 branding (`venues.logo_url`, etc.).
+
+**Amended 2026-09-17.** The host designs the collective page from its own Booking Page tab,
+which opens on the collective page for a venue in a live collective (a switch moves to the
+venue's own page). The page header shows the host's address, phone and opening hours, for
+information only: each calendar is still offered only when its own venue is open. The host can ask to use a member's own page address for the collective page;
+nothing changes until that member's admin agrees
+(`POST /api/venue/collectives/{id}/address-adoption`), and the address goes back to the member
+when it leaves. While a venue's own page hands over (§7.1), guests who follow its links see the
+collective's branding, not the venue's.
 
 ---
 
@@ -1158,6 +1369,37 @@ Linked venue and collective review (2026-09-05, second pass):
   owning venue's account would take it). The refusal used to remount the details step empty;
   `initialDetails` now falls back to the last submitted details, on both details steps.
 
+**Amended 2026-09-17: staff booking as built for shared services.**
+
+- **Every diary column opens the collective form (D2 as revised).** `GET
+  /api/venue/staff-collective` returns in `calendar_ids` every active people calendar of the
+  collective's eligible venues, the caller's own included, so a slot, New or Walk-in on any of
+  them opens the collective booking form. The earlier rule above ("a column with no combined
+  offering ... keeps the per-venue form") no longer applies to a venue in a live collective.
+- **Members' own services.** The 2026-09-05 decision that a member books its other services
+  through its own page is replaced on shared services by parking (§7.1): a venue's services that
+  are not on the page cannot take new bookings from any form while the collective is live, and
+  existing bookings on them stay manageable. A service the host marks "Staff bookings only" is
+  listed in every venue's staff form but not on the public page.
+- **A replica that is updating.** While a member's replica of a service has not caught up with
+  the host's latest save, that member's calendars are left out of the public page for that
+  service (exclusion `behind`, `src/lib/linked-accounts/replicas/derived-catalogue.ts`); the
+  staff build keeps them with a note (D16), and a booking on one is refused for staff with
+  "This service is being updated at {venue}. Please try again in a moment." and for guests with
+  "This service has just been updated. Please choose your time again." (409
+  `COLLECTIVE_SERVICE_UPDATING`, D33, built 2026-09-17: `resolveCollectiveBookingTarget` in
+  `collective-booking-bridge.ts`, used by every create route and `validate-appointment-slot`).
+  Staff may book the other calendars their form lists that guests cannot (payments not set up,
+  forms off, staff bookings only).
+- **Contact search across venues (D41).** While the collective is live, the staff form's contact
+  picker searches every live member venue whose account link shares client details with the
+  caller, and each result names the venue that owns the record
+  (`src/lib/linked-accounts/collective-contact-search.ts`). The scope ends with the membership;
+  what the links grant on their own carries on.
+- **Moving a booking between venues** from the diary uses the move route in §7.7 (D46).
+- **Shared people (D47).** When the same person has calendars at two venues and is already
+  booked at one, whoever books second sees a warning; nothing prevents the booking.
+
 ## 9. Notifications
 
 All link-related emails are sent via the existing **SendGrid** integration on the
@@ -1246,6 +1488,26 @@ This should be reflected in:
 
 These legal/product copy updates should be reviewed by Resneo's Northern Ireland commercial
 solicitor before treating the feature as production-ready for all founding venues.
+
+**Amended 2026-09-17: venue collectives.**
+
+- **A collective adds no data sharing of its own (D41).** Client and booking access between
+  collective venues comes from their full-access account links, before, during and after the
+  collective. Leaving or ending a collective changes the booking page, the collective staff
+  form, the cross-venue contact search and the collective report view, not the links.
+- **Consent at join (D49).** The join dialog's consent (`join.consent`, recorded on the
+  membership with `consent_version`, `consented_at` and `consented_by_user_id`) says in plain
+  words that the venues can see each other's clients, bookings and takings through their
+  account links, and reports name each venue's figures rather than blending them.
+- **Each venue stays the controller of its own guests.** A booking made through the collective
+  page or moved between venues (§7.7) creates or matches the client record in the venue that
+  owns the booking; records are never merged across venues (D42).
+- **What guests see.** The collective page names the venue a guest is booking with before they
+  pay, and the confirmation says which collective they booked through.
+- **Legal review (D9).** The owner recorded counsel's review of the collective model, the
+  consent text, the trader line and the unticked marketing consent as complete on 2026-09-14.
+- **Minimal names in notices.** Cross-venue dialogs, notices and refusal payloads carry dates,
+  times and calendars, never client names (D26, D34), even though the links would allow them.
 
 ### 10.3 Customer-facing disclosure
 
@@ -1357,6 +1619,22 @@ Status key: ✅ shipped · 🟡 partial · ⬜ not started
 - A collective-wide staff booking form. The staff-facing New Booking form stays scoped to the
   signed-in venue; cross-venue booking goes through the Linked calendars screen so the boundary,
   the client ownership and the audit trail all stay intact. Decided 2026-08-05, see §14.
+
+**Amended 2026-09-17.** Two items above no longer hold for venue collectives:
+
+- The collective-wide staff booking form shipped on 2026-09-04 (§8.7) and, on shared services,
+  every diary column opens it. The 2026-08-05 decision still applies to venues that are only
+  linked.
+- Cross-venue reporting: Booked revenue shows a collective's venues side by side, each named in
+  its own row, with the part booked through the collective page (D49). A general multi-venue
+  analytics dashboard is still out of scope.
+
+Still out of scope for collectives, by decision: merging client records across venues (D42), a
+room or piece of equipment shared between venues (D45), a person identity above the venue (D47,
+warn only), one login working at two venues (D38: adding someone who already works at another venue as
+staff is refused), a per-collective
+charge (D39), future-dated host changes (D51), and booking models other than appointments on
+the collective page (D44).
 
 ---
 
@@ -1622,18 +1900,23 @@ spec.
 | `grant` route | "Never unilaterally increase" (§6.5, old text) | **Unilateral grant of *own* data** shipped; §6.5 refined. |
 | Unilateral grant of own data | Not specified | `POST …/[id]/grant`; now documented in §6.5. |
 | `linked-calendar/venue-profile` | Not specified | Read-only public-booking surface for cross-venue create; gated on `create_edit_cancel`; PII-safe (no guest data). |
-| Booking source for collective bookings | `booking_source='online'` (§7.7) | Uses `'booking_page'` (treated as online-equivalent). |
-| Host transfer | New host must accept (§7.4) | Immediate `host_venue_id` update; **"Make host" UI shipped** (§16.2). Acceptance step still not required (deviation stands). |
+| Booking source for collective bookings | `booking_source='online'` (§7.7) | Uses `'booking_page'` (treated as online-equivalent). **Settled 2026-09-17 (D55):** no collective source value; attribution is `bookings.collective_id`. |
+| Host transfer | New host must accept (§7.4) | Legacy model: immediate `host_venue_id` update; **"Make host" UI shipped** (§16.2), no acceptance step. **Shared services (2026-09-17):** closed. A request the member accepts with consent, moving 14 days later (§7.4); `transfer_host` is refused there. |
 | Stale host after cascade | Host transfer or dissolve required (§7.4/§7.5) | **Fixed 2026-06-04** — `reconcileCollective` now auto-reassigns hosting to the longest-tenured survivor (or dissolves if <2 remain); new host emailed. |
-| Collective name reuse | 30 days after dissolve (§7.2.1) | Active-name uniqueness only. |
+| Collective name reuse | 30 days after dissolve (§7.2.1) | **Closed (checked 2026-09-17):** create refuses a name used by a collective dissolved in the last 30 days (`POST /api/venue/collectives`), as §15.5 records. The same host may take a dissolved collective's address back sooner (DL4). |
 | Collective branding | Host sets logo/colour (§7.1, §7.8) | **UI shipped 2026-06-04** — create + Edit-settings collect logo URL / brand colour / description (§16.2). |
 | Member visibility config | Per-member practitioner/service/order (§7.3) | **UI shipped 2026-06-04** — "Configure my listing" modal (show-all / choose-specific practitioners + services + display order); `myConfig` on `CollectiveView` prefills it (§16.2). |
 | GDPR notice | Short notice in acceptance modal (§10.2) | **Implemented** in review modal — but not shown in the "Accept with changes" sub-view (§19.2). |
 | Default preset action | Was `edit_existing` (§5.4, old text) | **Closed 2026-07-26** — `create_edit_cancel` confirmed as the intended default; §5.4 updated to match the code. |
 | No-PII name visibility | Name hidden when `pii=false` (§5.2) | **Closed 2026-07-26** — guest-name snapshots (and `client_address_*`) are now stripped for no-PII viewers on every cross-venue read route. |
 | time_only detail reads | time_only = busy blocks only (§5.1) | **Closed 2026-07-26** — the booking detail GET and bookings-list linked modes now require `full_details`; time_only viewers are limited to the anonymised calendar feed. |
-| Combined page group bookings | Not specified | Single bookings only: the group pipeline (`create-group`) has no collective routing, so the group option is hidden on a collective page until that ships. |
-| `allow_any_practitioner` column | §7.6 flag on `venue_collectives` | **Dropped 2026-07-26** (migration `20270101122000`) — it was never wired; the combined page follows the HOST venue's own flag, and per-offering pooling uses `collective_service_items.allow_any_available`. §4.3/§7.3/§7.4/§7.6 reconciled to this 2026-08-05. **Caveat, not yet addressed:** because the switch is the host's *own venue* setting rather than a collective setting, a host turning "Any available practitioner" off for its own booking page silently removes the option from the shared collective page too, for every member, with nothing in the UI signalling the coupling. Harmless until someone reports "Any available vanished from our combined page", at which point this is the cause. Fixing it properly needs a product decision on who should own the switch (host alone, or a collective-level setting), so it is recorded rather than patched. |
+| Combined page group bookings | Not specified | Single bookings only: the group pipeline (`create-group`) has no collective routing, so the group option is hidden on a collective page until that ships. **Superseded (checked 2026-09-17):** `create-group` now resolves a collective, and a group must land at one venue (D28); a party spread across venues is refused, and the page says so before the details step. |
+| `allow_any_practitioner` column | §7.6 flag on `venue_collectives` | **Dropped 2026-07-26** (migration `20270101122000`) — it was never wired; the combined page follows the HOST venue's own flag, and per-offering pooling uses `collective_service_items.allow_any_available`. §4.3/§7.3/§7.4/§7.6 reconciled to this 2026-08-05. **Caveat, not yet addressed:** because the switch is the host's *own venue* setting rather than a collective setting, a host turning "Any available practitioner" off for its own booking page silently removes the option from the shared collective page too, for every member, with nothing in the UI signalling the coupling. Harmless until someone reports "Any available vanished from our combined page", at which point this is the cause. Fixing it properly needs a product decision on who should own the switch (host alone, or a collective-level setting), so it is recorded rather than patched. **Decided 2026-09-14 (D32): the host owns it**, so the coupling is intended; §7.6. |
+| Service model | One model: each venue's own services, linked by offerings and providers (§7.7.2, §7.7.3) | **Two models (2026-09-17).** `venue_collectives.service_model` is `legacy_copies`, `migrating` or `replicas` (§7.1). Existing collectives stay on the legacy model until `scripts/collective-replicas-migrate.mjs` moves each one (D54: the host's values apply to every service on the page, and every existing booking keeps its calendar, service, price snapshot, terms and manage links). The migration sends nothing to the venues. |
+| New collectives on shared services | New collectives start on shared services once the switch is made (plan §8.2, D37) | **Switch built 2026-09-17, still off.** `POST /api/venue/collectives` takes `service_model` from the console setting (`platform_settings`, D37), which ships as `legacy_copies`. |
+| Members' own booking pages | Unchanged while in a collective (§7.1, original text) | **Shared services (2026-09-17):** every venue's own appointment links hand over to the collective page while it is live and the venue has a listed calendar (D3, §7.1). Legacy model: the stored `solo_page_behavior` choice still applies. |
+| Guest sign-in on the collective page | The host's setting only (D32) | **Built 2026-09-17** for shared services: the page and the three create routes use the host's setting (`replicas/collective-sign-in.ts`). The older model keeps any-member on the page and the owning venue at booking. |
+| "Came from {host}" label after release | A released service carries "Came from {host}" for 30 days when the member kept a same-named original (D52) | **Not built (2026-09-17).** The string `svc.member.card.cameFrom` exists in `collective-copy.ts` and nothing renders it. |
 
 When closing a deviation, update this table and the relevant normative section (§7 / §8 / §10).
 

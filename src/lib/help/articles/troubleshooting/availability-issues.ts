@@ -5,7 +5,7 @@ export const article: HelpArticle = {
   title: 'Slots not showing or calendar gaps',
   description: 'Why your booking page offers no times: services without a calendar, the two sets of hours, closures, booking rules, and paused billing.',
   tags: ['availability', 'slots', 'calendar'],
-  verified: '2026-09-12',
+  verified: '2026-09-17',
   content: `
 # No times showing on your booking page
 
@@ -35,6 +35,10 @@ Check both places. **Closures & special days** on **Settings → Business hours*
 ## 5. The service's own rules
 
 Open the service and look at **Guest booking rules**. **Min booking notice (hours)** hides slots that are too soon, and **Max advance (days)** hides dates too far ahead. **Buffer (mins)** adds tidy-up time after every appointment, which is often enough to lose the last slot of the day. **Active (visible to clients)** must be ticked. The **When guests can book this service online** panel on the same form previews what a client would actually see.
+
+## 6. Your venue is in a collective
+
+On a [venue collective](/help/getting-started/venue-collectives) page, a venue's calendars are left out of a service when that venue has not connected Stripe and the service asks for payment, when the service asks for a form and the venue has compliance records switched off, or while the service is still being set up at that venue. The **What needs you** list in the **Collective** area names each one. A member's own services that are not on the collective page are parked, so nobody can book them until they are added or the venue leaves.
 
 ## What your clients see, and what it means
 

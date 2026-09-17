@@ -90,6 +90,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
       if (isPlatformSuperuserFromIdentity(identity)) {
         redirect('/super');
       }
+      if (staff.multipleVenues) {
+        redirect('/auth/venue-locked');
+      }
       redirect('/signup/business-type');
     }
 

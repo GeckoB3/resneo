@@ -7,6 +7,7 @@ import { NumericInput } from '@/components/ui/NumericInput';
 import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import { Dialog } from '@/components/ui/primitives/Dialog';
 import { Button } from '@/components/ui/primitives/Button';
+import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 
 const COLOUR_OPTIONS = [
   '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6',
@@ -59,6 +60,16 @@ interface Props {
   calendarChoices?: CalendarChoice[];
   selectedCalendarId?: string;
   onSelectedCalendarChange?: (calendarId: string) => void;
+  /**
+   * The one calendar these values are for, when the dialog is opened from that calendar (an admin
+   * on Calendar Availability, CSA-08). The calendar is always sent, and the copy names it.
+   */
+  calendar?: CalendarChoice;
+  /**
+   * The service is on a collective page (UX spec items 2, 4 and 9): its name and description are one
+   * everywhere (D29), the standard values are the host's, and a member's staff are told who decides.
+   */
+  collective?: { hostName: string; venueName: string; isMember: boolean } | null;
 }
 
 export function StaffServiceOverrideModal({
@@ -71,6 +82,8 @@ export function StaffServiceOverrideModal({
   calendarChoices = [],
   selectedCalendarId,
   onSelectedCalendarChange,
+  calendar,
+  collective = null,
 }: Props) {
   const sym = currencySymbolFromCode(currency);
 
@@ -159,7 +172,9 @@ export function StaffServiceOverrideModal({
       const raw = buildPatch();
       const { service_id, ...rest } = raw;
       const body: Record<string, unknown> = { service_id };
-      if (calendarChoices.length > 1 && selectedCalendarId) {
+      if (calendar) {
+        body.calendar_id = calendar.id;
+      } else if (calendarChoices.length > 1 && selectedCalendarId) {
         body.calendar_id = selectedCalendarId;
       }
       for (const [k, v] of Object.entries(rest)) {
@@ -183,9 +198,16 @@ export function StaffServiceOverrideModal({
     }
   }
 
+  const mayName = Boolean(service.staff_may_customize_name) && !collective;
+  const mayDescription = Boolean(service.staff_may_customize_description) && !collective;
+  const standard = (value: string) =>
+    collective ? collectiveCopy('values.standard', { value }) : `Venue default: ${value}`;
+  const calendarName =
+    calendar?.name ?? calendarChoices.find((c) => c.id === selectedCalendarId)?.name ?? 'your calendar';
+
   const anyField =
-    service.staff_may_customize_name ||
-    service.staff_may_customize_description ||
+    mayName ||
+    mayDescription ||
     service.staff_may_customize_duration ||
     service.staff_may_customize_buffer ||
     service.staff_may_customize_price ||
@@ -200,13 +222,13 @@ export function StaffServiceOverrideModal({
       onOpenChange={(next) => {
         if (!next) onClose();
       }}
-      title={`Your settings: ${base.name}`}
+      title={calendar ? `${base.name} on ${calendar.name}` : `Your settings: ${base.name}`}
       size="md"
       footer={
         <OverrideModalFooter onClose={onClose} onSave={() => void handleSave()} saving={saving} />
       }
     >
-      {calendarChoices.length > 1 && selectedCalendarId && onSelectedCalendarChange ? (
+      {!calendar && calendarChoices.length > 1 && selectedCalendarId && onSelectedCalendarChange ? (
         <div className="mb-4">
           <label className="mb-1 block text-sm font-medium text-slate-700">Calendar</label>
           <select
@@ -223,14 +245,20 @@ export function StaffServiceOverrideModal({
         </div>
       ) : null}
       <p className="mb-4 text-sm text-slate-600">
-        {calendarChoices.length > 1
-          ? 'Changes apply only to the calendar you select above. Match the venue default to clear your override for a field.'
-          : 'Changes apply only to your calendar. Match the venue default to clear your override for a field.'}
+        {collective
+          ? collective.isMember
+            ? collectiveCopy('values.help.member', { host: collective.hostName, calendar: calendarName })
+            : collectiveCopy('reach.calendar.values', { calendar: calendarName, venue: collective.venueName })
+          : calendar
+          ? `These values apply to ${calendar.name} only. Set a field back to the venue default to clear it.`
+          : calendarChoices.length > 1
+            ? 'Changes apply only to the calendar you select above. Match the venue default to clear your override for a field.'
+            : 'Changes apply only to your calendar. Match the venue default to clear your override for a field.'}
       </p>
       {error ? <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
 
       <div className="space-y-4">
-        {service.staff_may_customize_name ? (
+        {mayName ? (
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">Display name</label>
             <input
@@ -239,10 +267,10 @@ export function StaffServiceOverrideModal({
               onChange={(e) => setName(e.target.value)}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
             />
-            <p className="mt-1 text-xs text-slate-500">Venue default: {base.name}</p>
+            <p className="mt-1 text-xs text-slate-500">{standard(base.name)}</p>
           </div>
         ) : null}
-        {service.staff_may_customize_description ? (
+        {mayDescription ? (
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">Description</label>
             <textarea
@@ -263,7 +291,7 @@ export function StaffServiceOverrideModal({
               onChange={setDurationMinutes}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
             />
-            <p className="mt-1 text-xs text-slate-500">Venue default: {base.duration_minutes} min</p>
+            <p className="mt-1 text-xs text-slate-500">{standard(`${base.duration_minutes} min`)}</p>
           </div>
         ) : null}
         {service.staff_may_customize_buffer ? (

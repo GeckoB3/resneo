@@ -4,9 +4,9 @@ export const article: HelpArticle = {
   slug: "linked-venues",
   helpSection: "gs-grow",
   title: "Link with another venue",
-  description: "Share calendars and bookings with another ResNeo venue, and put several linked venues on one combined booking page.",
+  description: "Share calendars and bookings with another ResNeo venue, and see how links underpin a venue collective.",
   tags: ["linked accounts","linked venues","venue collective","combined booking page","chair rental","multi venue","sharing"],
-    verified: '2026-09-12',
+  verified: '2026-09-17',
   content: `# Link with another venue
 
 If you share a space with another business, rent a chair to someone self-employed, or run more than one venue, you can link your ResNeo accounts. Linking lets two venues see each other's calendars and, if you both agree, manage each other's bookings.
@@ -23,7 +23,7 @@ There are two separate things here, and most businesses only need the first.
 | Who sees it | Only you and your teams | Your clients |
 | Good for | A chair renter, a shared room, covering each other | Two businesses trading under one name |
 | What it needs | Whatever access you both agree | Full access, both ways, no calendar limits |
-| Undoing it | **Unlink** | **Dissolve collective** |
+| Undoing it | **Unlink** | The host ends it with **End** and the collective's name |
 
 Start with a link. You do not need a collective to share a diary.
 
@@ -127,49 +127,9 @@ Emails go to your venue's contact address and to active admins. The last one can
 
 ## Put linked venues on one booking page
 
-A **venue collective** is a single public booking page covering two or more linked venues under one brand.
+A **venue collective** puts two or more linked venues on one public booking page, with one set of services that the host venue manages. It needs a link that is fully open in **both** directions: full booking detail, create, edit and cancel, and no limit to particular calendars. Creating one, joining one, and running the page are covered in [Run several venues as one collective](/help/getting-started/venue-collectives).
 
-Before you can create one, the link must be fully open in **both** directions: full booking detail, create, edit and cancel, and no limit to particular calendars.
-
-1. Open **Settings**, then **Linked Accounts**, and scroll to **Venue collectives**.
-2. Click **Create venue collective**.
-3. Under **Collective name**, type a name clients will recognise.
-4. Under **Booking-page address**, choose the bit that goes after \`/book/c/\`. ResNeo tells you whether the address is free.
-5. Under **Invite linked venues**, tick the venues you want.
-6. Click **Create collective**.
-7. Each venue you invited opens **Settings**, then **Linked Accounts**, and clicks **Accept invitation**. Until they do, their chairs do not appear.
-
-Your combined page works like a single venue: one services menu and one team across all members. Once it is live, the sidebar swaps **Your Booking Page** for a link named after the collective, marked **(combined)**, so your team always shares the right address.
-
-> **Good to know:** a venue can be in one collective at a time. Once you are in one, the **Create venue collective** button disappears rather than greying out. The combined page needs at least two accepted members before it goes live.
-
-### Set up the combined page
-
-The venue that created the collective is the **Host** and is the only one who can edit the page. Once the collective is live, open **Settings**, then **Booking Page**: it opens on the combined page, with three tabs. A switch at the top, **Combined page** or **This venue's own page**, moves you between the shared page and your own. The same editor opens as a window from **Manage combined page** on the Linked Accounts tab.
-
-**Page** is the page designer, the same one you use for your own booking page, plus three things unique to a collective:
-
-- **Page name (shown to customers)**, which you can change at any time.
-- **Booking page address**: the full address with **Copy link** and **Open** buttons, then either a **Dedicated address** at \`/book/c/your-address\`, or **Use a member venue's existing booking address**, which puts the combined page on that venue's own address. Be careful with the second: that venue's solo page is then the combined page.
-- **Settings that follow the host venue**: the combined page has no settings of its own for the "any available practitioner" and staff-first booking options, the address, phone, website and opening hours in the header, or the currency and wording. Change those in the host venue's own **Settings** and the combined page follows. Prices, durations, deposits and cancellation notice always come from each member venue's own service, because every booking is made with that venue.
-
-Underneath sits **About: contact details and opening hours**, a read-only panel showing the phone, website, address and opening hours the combined page puts in its header and its **About** tab. They are the host venue's, read straight from the host's **Settings → Profile** and **Settings → Business hours**, so a change there shows on the page at once. There is no separate copy to keep up to date, and a member who wants them changed has to ask the host.
-
-> **Important: those opening hours do not decide availability.** They are information for customers. Every linked account still sets its own business hours, closures and calendar hours for its own people, and the combined page offers a time on a calendar only when that calendar's own account says it is free. A calendar at another venue can be open outside the hours shown in the header, or closed inside them. Keep your own venue's hours right under **Settings → Business hours** and each person's under **Calendar Availability**, because those are what bookings into your calendars actually follow.
-
-**Services & calendars** is where you build the menu. **Choose services to offer** lists every bookable service at each member venue: tick the ones you want and add them together. They then appear under **Offerings on your combined page**, where you can open an offering and tick which venues' calendars can take it. You can also type a name to create a custom offering. Categories give the page its headings, and **Match categories from your venues** files anything uncategorised under the heading it already has at its own venue.
-
-When you tick a calendar at a venue that does not yet have the service, ResNeo copies it into that venue. From then on the copy is marked **in step**: its duration, buffer, processing periods and options follow the original whenever that is saved. Price and description stay that venue's own; add-ons are matched each time the copy is linked or updated from the manager. If the venue edits the copy's duration, processing or options itself, the row changes to **customised** and stops following; you can **Re-sync** it (ResNeo asks first), or click **Stop syncing** on any copy to leave it alone for good. When you tick a calendar at a venue that already has a service with the same name, ResNeo asks whether to update that service to match the original and keep it in step; say no and the calendar is added with the service left as it is. Every copy at another venue carries a badge: **Linked to (venue), in step**; **Linked, behind (venue)** with what differs (for example 30 min here, 45 min there); **Not linked**, with whether it differs from the original today; or **Edited at (venue), no longer following**. Beside it is the next step: **Link to (venue)**, **Update from (venue)**, **Relink to (venue)**, or **Unlink**. Linking asks first, then updates the duration, buffer, processing periods, options and add-ons to match the original and keeps the copy following from then on (price and description stay the venue's own); unlinking leaves the copy exactly as it is. **Link all copies** and **Unlink all copies** at the top of the list, and the same pair on each offering, do this for several copies at once.
-
-> **Good to know:** once the collective is live, the **Book again** links in your emails and in a client's ResNeo account point at the combined page rather than each venue's own, so a client following one up sees the whole group's menu.
-
-**Members** lists every venue with **(host)** or **(invited)** beside it. From here the host can **Invite a venue** and click **Send invitation**, **Remove** a member, **Make host** to hand the collective to someone else, or **Dissolve collective**.
-
-Members who are not the host do not get these tabs. Their **Booking Page** tab shows who hosts the page, its address with a **Copy link** button, and which of their calendars are on it. Their services appear using their own price, duration and availability, and they can view the page or use **Leave** on the collective row under Linked Accounts to step out.
-
-### Ending a collective
-
-A member leaves with **Leave**. The host ends the whole thing with **Dissolve collective**, on the **Members** tab. The combined page goes offline straight away, and every venue keeps its own page, bookings and clients. You can create a new collective immediately afterwards. The only wait is on the name: a name another venue's collective was using is held for 30 days, so pick a different one if ResNeo says it is not available yet.
+> **Good to know:** a collective never changes your links. Leaving or ending one leaves every link, and the access it gives, exactly as it is.
 
 ## Common problems & fixes
 
@@ -183,12 +143,11 @@ A member leaves with **Leave**. The host ends the whole thing with **Dissolve co
 | Linked columns have vanished from the calendar | They are switched off in the filter | Click **Filter**, then tick **All linked calendars** under **Linked venues** |
 | **Create venue collective** is greyed out | The link is not fully open both ways | Open **Edit permissions** and set both sides to full detail and create, edit and cancel, with no calendar limits |
 | The **Create venue collective** button has vanished | You are already in a collective, and a venue can only be in one | Leave or dissolve the one you are in first |
-| The combined page says it is unavailable | Fewer than two venues have accepted | Ask the invited venues to click **Accept invitation** |
-| The collective name is refused | Another venue's collective used it in the last 30 days | Choose a different name |
 
 ## Next steps
 
 - [Using the calendar](/help/getting-started/calendar)
 - [Add and manage your team](/help/getting-started/staff)
+- [Run several venues as one collective](/help/getting-started/venue-collectives)
 - [Your public booking page and embed](/help/getting-started/public-booking-page)`,
 };

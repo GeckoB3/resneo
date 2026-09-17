@@ -22,7 +22,9 @@ import { Button } from '@/components/ui/primitives/Button';
 import { ConfirmDialog } from '@/components/ui/primitives/ConfirmDialog';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
+import { Pill } from '@/components/ui/dashboard/Pill';
 import type { ServiceCategoryRef } from '@/lib/booking/service-categories';
+import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 
 /**
  * The Categories tab of the Services page: create, rename, delete and reorder
@@ -99,6 +101,19 @@ export interface ServiceCategoriesManagerProps {
   isAdmin: boolean;
   /** The list after any successful change, so the parent can keep its copy in step. */
   onChange: (next: ServiceCategoryRef[]) => void;
+  /**
+   * The live collective this venue is part of (UX spec §2 item 6). A member's headings from its host
+   * cannot be renamed or deleted here; the host is told which headings reach every venue.
+   */
+  collective?: {
+    name: string;
+    hostName: string;
+    isHost: boolean;
+    /** The other venues, for the host's sentences. */
+    venueList: string;
+    /** Headings used by services on the page, with how many (host only). */
+    onPageCountByCategory?: ReadonlyMap<string, number>;
+  } | null;
 }
 
 const CATEGORY_NAME_MAX = 80;
@@ -169,6 +184,7 @@ export function ServiceCategoriesManager({
   api = venueServiceCategoryApi,
   settingsHint = DEFAULT_SETTINGS_HINT,
   uncategorisedHint = DEFAULT_UNCATEGORISED_HINT,
+  collective = null,
 }: ServiceCategoriesManagerProps) {
   // Local copy so a drag shows instantly; the parent's list follows on success.
   const [items, setItems] = useState<ServiceCategoryRef[]>(categories);
@@ -311,7 +327,13 @@ export function ServiceCategoriesManager({
       <SectionCard>
         <SectionCard.Header
           title="Categories"
-          description="Group your services under headings on your booking page, so customers find what they want faster. Drag the handle (or use the arrows) to set the order they appear in."
+          description={
+            collective
+              ? collective.isHost
+                ? collectiveCopy('cat.host.description', { collective: collective.name, venueList: collective.venueList })
+                : collectiveCopy('cat.member.description', { host: collective.hostName, collective: collective.name })
+              : 'Group your services under headings on your booking page, so customers find what they want faster. Drag the handle (or use the arrows) to set the order they appear in.'
+          }
         />
         <SectionCard.Body>
           {isAdmin ? (
@@ -366,6 +388,10 @@ export function ServiceCategoriesManager({
                   {items.map((category, index) => {
                     const count = serviceCountByCategory.get(category.id) ?? 0;
                     const isEditing = editingId === category.id;
+                    const lockedByHost = Boolean(collective && !collective.isHost && category.managed);
+                    const lockedTip = lockedByHost
+                      ? collectiveCopy('cat.member.lockedTooltip', { host: collective!.hostName, collective: collective!.name })
+                      : undefined;
                     return (
                       <SortableCategoryRow
                         key={category.id}
@@ -439,18 +465,49 @@ export function ServiceCategoriesManager({
                                 <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                                   <span className="truncate text-sm font-medium text-slate-900">{category.name}</span>
                                   <span className="text-xs text-slate-400">{pluralServices(count)}</span>
+                                  {lockedByHost ? (
+                                    <Pill variant="brand" size="sm">
+                                      {collectiveCopy('common.pill.fromHost', { host: collective!.hostName })}
+                                    </Pill>
+                                  ) : null}
+                                  {collective?.isHost && (collective.onPageCountByCategory?.get(category.id) ?? 0) > 0 ? (
+                                    <Pill variant="brand" size="sm">
+                                      {collectiveCopy('common.pill.collective')}
+                                    </Pill>
+                                  ) : null}
                                 </div>
                               )}
                             </div>
 
                             {isAdmin && !isEditing ? (
                               <div className="flex shrink-0 items-center gap-1">
-                                <Button type="button" variant="secondary" size="sm" onClick={() => startRename(category)}>
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={() => startRename(category)}
+                                  disabled={lockedByHost}
+                                  title={lockedTip}
+                                  aria-describedby={lockedByHost ? `locked-${category.id}` : undefined}
+                                >
                                   Rename
                                 </Button>
-                                <Button type="button" variant="danger" size="sm" onClick={() => setDeleteTarget(category)}>
+                                <Button
+                                  type="button"
+                                  variant="danger"
+                                  size="sm"
+                                  onClick={() => setDeleteTarget(category)}
+                                  disabled={lockedByHost}
+                                  title={lockedTip}
+                                  aria-describedby={lockedByHost ? `locked-${category.id}` : undefined}
+                                >
                                   Delete
                                 </Button>
+                                {lockedByHost ? (
+                                  <span id={`locked-${category.id}`} className="sr-only">
+                                    {lockedTip}
+                                  </span>
+                                ) : null}
                               </div>
                             ) : null}
                           </div>
@@ -481,7 +538,13 @@ export function ServiceCategoriesManager({
         }}
         title={deleteTarget ? `Delete "${deleteTarget.name}"?` : 'Delete category?'}
         message={
-          deleteCount > 0
+          collective?.isHost && deleteTarget && (collective.onPageCountByCategory?.get(deleteTarget.id) ?? 0) > 0
+            ? collectiveCopy('cat.host.deleteOnPage', {
+                count: collective.onPageCountByCategory?.get(deleteTarget.id) ?? 0,
+                collective: collective.name,
+                venueList: collective.venueList,
+              })
+            : deleteCount > 0
             ? `${pluralServices(deleteCount)} will stay bookable and move to "Other services" on your booking page. Nothing about a service is deleted.`
             : 'No services use this category. Nothing else changes.'
         }

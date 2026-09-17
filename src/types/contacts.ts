@@ -21,6 +21,10 @@ export interface GuestListRow {
   marketing_opt_out?: boolean;
   marketing_consent?: boolean;
   custom_fields?: Record<string, unknown>;
+  /** Set by the collective contact search (contract 16): the venue that owns the record. */
+  owner_venue_id?: string;
+  owner_venue_name?: string;
+  owner_is_self?: boolean;
 }
 
 export interface CommunicationRow {

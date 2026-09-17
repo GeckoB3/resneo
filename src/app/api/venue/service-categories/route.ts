@@ -57,6 +57,21 @@ async function requireAdmin(
   return { staff };
 }
 
+/**
+ * A heading the venue's collective manages is refused by the database (RN001, W6); say so about a
+ * heading rather than the engine's sentence about a service.
+ */
+function managedHeadingResponse(error: { code?: string | null }): NextResponse | null {
+  if (error.code !== 'RN001') return null;
+  return NextResponse.json(
+    {
+      error: 'This heading is managed by your collective’s host. Ask them to change it.',
+      code: 'COLLECTIVE_MANAGED_SERVICE',
+    },
+    { status: 409 },
+  );
+}
+
 /** GET: every category for the venue, in booking-page order. */
 export async function GET(request: NextRequest) {
   try {
@@ -153,6 +168,8 @@ export async function PATCH(request: NextRequest) {
       .maybeSingle();
     if (error) {
       if (error.code === UNIQUE_VIOLATION) return duplicateNameResponse(parsed.data.name);
+      const managed = managedHeadingResponse(error);
+      if (managed) return managed;
       console.error('PATCH /api/venue/service-categories failed:', error);
       return NextResponse.json({ error: 'Failed to rename the category' }, { status: 500 });
     }
@@ -196,6 +213,8 @@ export async function DELETE(request: NextRequest) {
       .select('id')
       .maybeSingle();
     if (error) {
+      const managed = managedHeadingResponse(error);
+      if (managed) return managed;
       console.error('DELETE /api/venue/service-categories failed:', error);
       return NextResponse.json({ error: 'Failed to delete the category' }, { status: 500 });
     }

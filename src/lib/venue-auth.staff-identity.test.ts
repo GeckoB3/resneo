@@ -31,7 +31,7 @@ vi.mock('@/lib/platform-auth', () => ({
 
 import { resolveAuthIdentity } from '@/lib/auth/resolve-auth-identity';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { getVenueStaff } from './venue-auth';
+import { getDashboardStaff, getVenueStaff, staffMembershipElsewhere } from './venue-auth';
 
 const mockIdentity = vi.mocked(resolveAuthIdentity);
 const mockAdmin = vi.mocked(getSupabaseAdminClient);
@@ -74,6 +74,11 @@ function adminOver(rows: StaffRow[]): SupabaseClient {
         working = working.filter((r) => (r as unknown as Record<string, unknown>)[col] === val);
         return builder;
       },
+      neq: (col: string, val: unknown) => {
+        filters.push([col, val]);
+        working = working.filter((r) => (r as unknown as Record<string, unknown>)[col] !== val);
+        return builder;
+      },
       is: (col: string, val: null) => {
         filters.push([col, val]);
         working = working.filter((r) => (r as unknown as Record<string, unknown>)[col] === null);
@@ -86,13 +91,13 @@ function adminOver(rows: StaffRow[]): SupabaseClient {
         );
         return builder;
       },
-      then: (resolve: (v: { data: StaffRow[]; error: null }) => unknown) => {
+      then: (resolve: (v: { data: StaffRow[]; error: null; count: number }) => unknown) => {
         if (patch) {
           backfills.push({ patch, filters });
           // Mirror the write, so a later read in the same test sees the claim.
           working.forEach((r) => Object.assign(r, patch));
         }
-        return Promise.resolve(resolve({ data: working, error: null }));
+        return Promise.resolve(resolve({ data: working, error: null, count: working.length }));
       },
     };
     return builder;
@@ -317,5 +322,87 @@ describe('the staff email fallback', () => {
     );
 
     expect(await getVenueStaff({} as SupabaseClient)).toBeNull();
+  });
+});
+
+describe('a login that works at more than one venue (D38)', () => {
+  function row(id: string, venueId: string, email: string, userId: string | null): StaffRow {
+    return { id, venue_id: venueId, email, role: 'staff', user_id: userId, revoked_at: null };
+  }
+
+  it('is told apart from "not staff" when both claimed rows carry its user_id', async () => {
+    /*
+      Both cases leave venue_id null, and the dashboard used to treat them the
+      same: straight into the signup flow, with no message. The flag is what
+      lets the layout send this person to an explanation instead.
+    */
+    const userId = freshUserId();
+    signedInAs(userId, 'two@example.test');
+    mockAdmin.mockReturnValue(
+      adminOver([row('s-a', VENUE, 'two@example.test', userId), row('s-b', 'venue-2', 'two@example.test', userId)]),
+    );
+
+    const dashboard = await getDashboardStaff({} as SupabaseClient);
+
+    expect(dashboard.venue_id).toBeNull();
+    expect(dashboard.multipleVenues).toBe(true);
+    expect(await getVenueStaff({} as SupabaseClient), 'API routes still refuse to pick a venue').toBeNull();
+  });
+
+  it('is flagged too when the two rows are unclaimed invites', async () => {
+    const userId = freshUserId();
+    signedInAs(userId, 'invited-twice@example.test');
+    mockAdmin.mockReturnValue(
+      adminOver([
+        row('s-a', VENUE, 'invited-twice@example.test', null),
+        row('s-b', 'venue-2', 'invited-twice@example.test', null),
+      ]),
+    );
+
+    expect((await getDashboardStaff({} as SupabaseClient)).multipleVenues).toBe(true);
+  });
+
+  it('is not flagged for someone who is simply not staff, or staff at one venue', async () => {
+    const outsider = freshUserId();
+    signedInAs(outsider, 'nobody@example.test');
+    mockAdmin.mockReturnValue(adminOver([]));
+    expect((await getDashboardStaff({} as SupabaseClient)).multipleVenues).toBeUndefined();
+
+    const member = freshUserId();
+    signedInAs(member, 'one@example.test');
+    mockAdmin.mockReturnValue(adminOver([row('s-one', VENUE, 'one@example.test', member)]));
+    const dashboard = await getDashboardStaff({} as SupabaseClient);
+    expect(dashboard.venue_id).toBe(VENUE);
+    expect(dashboard.multipleVenues).toBeUndefined();
+  });
+});
+
+describe('staffMembershipElsewhere', () => {
+  const at = (venueId: string, email: string, userId: string | null, revokedAt: string | null = null): StaffRow => ({
+    id: `s-${venueId}-${email}`,
+    venue_id: venueId,
+    email,
+    role: 'staff',
+    user_id: userId,
+    revoked_at: revokedAt,
+  });
+
+  it('finds an unrevoked row for the email at another venue, whatever its case', async () => {
+    const admin = adminOver([at('venue-2', 'Person@Example.test', null)]);
+    expect(await staffMembershipElsewhere(admin, VENUE, ' person@example.TEST ')).toBe(true);
+  });
+
+  it('ignores a row at the inviting venue itself and a revoked row elsewhere', async () => {
+    const admin = adminOver([
+      at(VENUE, 'person@example.test', null),
+      at('venue-2', 'person@example.test', null, '2026-08-01T00:00:00Z'),
+    ]);
+    expect(await staffMembershipElsewhere(admin, VENUE, 'person@example.test')).toBe(false);
+  });
+
+  it('finds a claimed row elsewhere by user id when its stored email has gone stale', async () => {
+    const admin = adminOver([at('venue-2', 'old-address@example.test', 'user-known')]);
+    expect(await staffMembershipElsewhere(admin, VENUE, 'new-address@example.test')).toBe(false);
+    expect(await staffMembershipElsewhere(admin, VENUE, 'new-address@example.test', 'user-known')).toBe(true);
   });
 });

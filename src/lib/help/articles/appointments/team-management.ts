@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: 'Team access, roles, and calendar links',
   description: 'Invite admins and staff, assign calendars, respect plan staff caps, reset passwords, and set the auto-logout timer for shared devices.',
   tags: ['staff', 'roles', 'security', 'invites', 'calendars', 'auto-logout'],
-  verified: '2026-09-12',
+  verified: '2026-09-17',
   content: `
 # Build a safe team workspace
 
@@ -61,9 +61,9 @@ Removing someone frees their login immediately, so a leaver makes room for a joi
 
 ## Calendar assignment: what it actually controls
 
-Admins have no calendar assignments, because they reach everything. Assignments only apply to the **Staff** role, and they are the whole of that person's edit permission.
+Admins have no calendar assignments, because they reach everything. Assignments only apply to the **Staff** role. They decide which calendars that person can set up, not which bookings they can work with.
 
-- **Diary and bookings.** When exactly one calendar is assigned, the appointment calendar and the bookings list open filtered to it. With two or more assigned, both open on **All**. Either way they can still switch the filter and look at other people's columns. Seeing is not the same as changing.
+- **Diary and bookings.** When exactly one calendar is assigned, the appointment calendar and the bookings list open filtered to it. With two or more assigned, both open on **All**. Either way they can switch the filter and work with every column, just as an admin does: open, edit, cancel and check in any booking, and drag a booking from one person's calendar to another's.
 - **Hours, breaks and closures.** They can edit these only for calendars assigned to them. Anything else is view only.
 - **Services.** They see the whole service list and can add services on their own calendars, use **Offer on your calendars** to choose which of their calendars offer a service, and use **Edit your settings** to adjust their own price or duration where a service allows it. They cannot create, rename, reorder or delete services for the venue.
 - **Classes, events and resources.** Only the ones on calendars assigned to them.

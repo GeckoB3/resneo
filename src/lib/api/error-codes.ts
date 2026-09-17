@@ -82,6 +82,121 @@ export const API_ERROR_CODES = [
   /** Downgrade blocked: too many active staff for the light plan. */
   'LIGHT_DOWNGRADE_STAFF',
 
+  // ── Team members ────────────────────────────────────────────────────────
+  /**
+   * The email already works at another venue. One login at two venues cannot
+   * open either dashboard, so the invite is refused rather than creating that
+   * state (collective plan D38).
+   */
+  'STAFF_EMAIL_AT_OTHER_VENUE',
+  /**
+   * Signup by an email that already works at a venue it does not own. Refused
+   * before checkout, because a new venue would put the login at two venues
+   * (D38); after a paid checkout it means no venue was created.
+   */
+  'SIGNUP_EMAIL_IS_TEAM_MEMBER',
+  /**
+   * staff/create was given an email that already has a login (a customer
+   * account, say). That route sets a password the admin chose, so it refuses
+   * rather than overwrite someone's credentials; Invite is the path instead.
+   */
+  'STAFF_EMAIL_HAS_LOGIN',
+  /**
+   * staff/[id]/reset-password on a row with no login bound to it yet (an invite
+   * nobody has accepted) or a revoked row. Resend invite is the path instead.
+   */
+  'STAFF_LOGIN_NOT_CLAIMED',
+  /**
+   * staff/[id]/reset-password on a login that is also used outside this venue's
+   * team (customer bookings, another venue, platform access), so only its owner
+   * may change the password. Resend invite emails them a link instead.
+   */
+  'STAFF_LOGIN_USED_ELSEWHERE',
+
+  // ── Collectives (plan Appendix D; mapped by src/lib/linked-accounts/replicas/db-errors.ts) ──
+  /** A member changed something its collective manages on a service. Ask the host; reload. */
+  'COLLECTIVE_MANAGED_SERVICE',
+  /** Deleting a service that is on a collective page. Withdraw it from the page first. */
+  'COLLECTIVE_OFFERED_SERVICE',
+  /** A member changed or used an add-on group its collective manages. */
+  'COLLECTIVE_MANAGED_ADDON_GROUP',
+  /** A member changed or required a form its collective manages. */
+  'COLLECTIVE_MANAGED_COMPLIANCE_TYPE',
+  /** The collective's host changes only through a host transfer. */
+  'COLLECTIVE_HOST_CHANGE_REFUSED',
+  /** A service that follows its collective cannot change its link to another venue's service. */
+  'COLLECTIVE_SYNC_COLUMNS_LOCKED',
+  /** Only the collective's host may do this. */
+  'COLLECTIVE_NOT_HOST',
+  /** The collective is still on the old copied-services model, so this action is not available. */
+  'COLLECTIVE_LEGACY_MODEL',
+  /** Only one of the host's own services can be offered on the collective page. */
+  'COLLECTIVE_OFFERING_NEEDS_HOST_SERVICE',
+  /** The venue named is not an active member of the collective. Reload the members. */
+  'COLLECTIVE_VENUE_NOT_MEMBER',
+  /** The calendar named belongs to a different venue than the one given. */
+  'COLLECTIVE_CALENDAR_NOT_AT_VENUE',
+  /** The member's copy of the service does not exist yet; retry shortly. */
+  'COLLECTIVE_REPLICA_NOT_READY',
+  /** A host transfer waits until every member's copy is up to date; retry in a few minutes. */
+  'COLLECTIVE_LINKS_BEHIND',
+  /** The venue's copy of the service is still catching up with the host; retry in a moment (409, D33). */
+  'COLLECTIVE_SERVICE_UPDATING',
+  /** Undo is only offered for a minute after a host's save (410). */
+  'COLLECTIVE_UNDO_EXPIRED',
+  /**
+   * A bulk change would stop a calendar offering a service it still has bookings for. Nothing was
+   * written: open that service to see the bookings, then send it again acknowledged.
+   */
+  'COLLECTIVE_AFFECTED_BOOKINGS',
+  /** A move of hosting is already pending; cancel it before asking another venue (409). */
+  'COLLECTIVE_TRANSFER_PENDING',
+  /** Accepting needs the consent the venue was shown, sent back with its version (409). */
+  'COLLECTIVE_CONSENT_REQUIRED',
+  /** A timezone change while the venue is part of a collective, which shares one timezone (409). */
+  'COLLECTIVE_TIMEZONE_LOCKED',
+  /** The venue has no active appointments model, so it cannot be invited or accept (409, BM-01). */
+  'COLLECTIVE_NO_APPOINTMENTS',
+  /** Switching appointments off while the venue is part of a collective (409). */
+  'COLLECTIVE_BOOKING_MODEL_LOCKED',
+  /** The venues would trade in different currencies: at create, invite and accept, or a change (409). */
+  'COLLECTIVE_CURRENCY_MISMATCH',
+  /** A venue can be part of one live collective at a time: invite, accept and create refuse a second (409). */
+  'COLLECTIVE_VENUE_IN_OTHER_COLLECTIVE',
+  /** That member's service is already waiting for its answer to an earlier request (409). */
+  'COLLECTIVE_ADOPTION_PENDING',
+  /** The adoption was already answered, or can no longer be (409). */
+  'COLLECTIVE_ADOPTION_NOT_PENDING',
+  /** Another live collective page already uses that venue's page address (409). */
+  'COLLECTIVE_ADDRESS_TAKEN',
+  /** No request to use this venue's page address is waiting for an answer (409). */
+  'COLLECTIVE_ADDRESS_NOT_PENDING',
+  /** A booking with a deposit, hold, payment or completed form, or in a visit, stays at its venue (409, D46). */
+  'COLLECTIVE_MOVE_ATTACHED',
+  /** The other venue's calendar does not offer the booked service or option (409, D46). */
+  'COLLECTIVE_MOVE_SERVICE',
+  /** The booking cannot move there: not the same live collective, or not the venue's client (409, D46). */
+  'COLLECTIVE_MOVE_NOT_ALLOWED',
+  /** The migration to shared services cannot start, finish or roll back in this state (W9; script only). */
+  'COLLECTIVE_MIGRATION_REFUSED',
+  /** The time is not free on the other venue's calendar (409, D46). */
+  'COLLECTIVE_MOVE_TIME',
+  /** An older manager action with no shared-services equivalent (MGR-01), each with its own reason (409). */
+  'COLLECTIVE_REPLICAS_ALWAYS_FOLLOW',
+  'COLLECTIVE_HEADINGS_FOLLOW_SERVICES',
+  'COLLECTIVE_EDIT_ON_SERVICES_PAGE',
+  /**
+   * A new booking, or a booking moved to another service, for a service that is parked: the venue is
+   * live in a collective and the service is not one of the collective's. Offer a collective service.
+   */
+  'COLLECTIVE_SERVICE_PARKED',
+
+  /**
+   * The service is marked "staff bookings only" (`is_bookable_online = false`), so a guest-facing
+   * source cannot book it; staff sources (phone, walk-in) still can.
+   */
+  'SERVICE_NOT_BOOKABLE_ONLINE',
+
   // ── Generic ─────────────────────────────────────────────────────────────
   'VALIDATION_FAILED',
   'NOT_FOUND',

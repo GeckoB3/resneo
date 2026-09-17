@@ -1,3 +1,4 @@
+import { managedByCollectiveRefusal } from '@/lib/linked-accounts/replicas/managed-guard';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
@@ -65,6 +66,8 @@ export async function PATCH(request: NextRequest, ctx: RouteCtx) {
     if (!existing || (existing as { venue_id?: string }).venue_id !== staff.venue_id) {
       return NextResponse.json({ error: 'Group not found' }, { status: 404 });
     }
+    const managed = await managedByCollectiveRefusal(admin, 'addon_groups', id, staff.venue_id);
+    if (managed) return managed;
 
     const result = await upsertAddonGroup({
       admin,
@@ -122,6 +125,8 @@ export async function DELETE(request: NextRequest, ctx: RouteCtx) {
     if (!existing || (existing as { venue_id?: string }).venue_id !== staff.venue_id) {
       return NextResponse.json({ error: 'Group not found' }, { status: 404 });
     }
+    const managed = await managedByCollectiveRefusal(admin, 'addon_groups', id, staff.venue_id);
+    if (managed) return managed;
 
     const hasBookings = await addonGroupHasBookings(admin, id);
     if (hasBookings) {

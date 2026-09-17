@@ -6,6 +6,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { isParked, loadBookableServiceIds } from '@/lib/linked-accounts/replicas/parking';
+import type { RpcClient } from '@/lib/linked-accounts/replicas/crons';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { VENUE_CATALOG_CACHE_CONTROL } from '@/lib/realtime/dashboard-sync-constants';
 import {
@@ -144,6 +146,25 @@ async function handleStaffAppointmentCalendarGet(request: NextRequest) {
       return NextResponse.json(
         { error: 'This venue does not offer appointment bookings' },
         { status: 403 },
+      );
+    }
+
+    // D2: a parked service has no dates for a new booking; moving an existing booking is not one.
+    if (
+      !excludeBookingId &&
+      isParked(await loadBookableServiceIds(admin as unknown as RpcClient, calendarVenueId), serviceId)
+    ) {
+      return NextResponse.json(
+        {
+          venue_id: staff.venue_id,
+          practitioner_id: anyAvailable ? ANY_AVAILABLE_PRACTITIONER_ID : practitionerId,
+          service_id: serviceId,
+          year,
+          month,
+          available_dates: [],
+          any_available: anyAvailable || undefined,
+        },
+        { headers: { 'Cache-Control': 'no-store' } },
       );
     }
 

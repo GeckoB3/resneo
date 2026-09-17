@@ -6,6 +6,7 @@ import { evaluateLinkEligibility } from './eligibility';
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
 import type { BookingPageConfig } from '@/lib/booking/booking-page-theme';
 import type { OpeningHours } from '@/components/booking/types';
+import { OTHER_MODEL_COLUMNS, otherBookingModelList, type VenueModelColumns } from '@/lib/linked-accounts/collective-other-models';
 import {
   inheritCollectivePageConfigFromHost,
   type CollectiveBookingPageConfig,
@@ -175,6 +176,20 @@ export interface CollectiveView {
     displayOrder: number;
     soloPageBehavior: SoloPageBehavior;
   } | null;
+  /** 'replicas' once the collective shares services through the engine (W3); the lifecycle differs. */
+  serviceModel: string;
+  /** Set while the page is paused because its host left or lapsed (plan §6.7). */
+  pausedAt: string | null;
+  /**
+   * A move of hosting in progress: asked (no date yet), or accepted with the day it happens (W7,
+   * contract 8). Null when nothing is pending.
+   */
+  pendingHost: { venueId: string; venueName: string; transferAt: string | null } | null;
+  /**
+   * The venue whose page address the host has asked to use, waiting for its admin (§6.9, N38).
+   * Null when nothing is waiting, or on the older model.
+   */
+  pendingAdoptedVenueId?: string | null;
   members: {
     venueId: string;
     venueName: string;
@@ -183,6 +198,8 @@ export interface CollectiveView {
     status: CollectiveMemberStatus;
     displayOrder: number;
     soloPageBehavior: SoloPageBehavior;
+    /** The venue's classes, events or bookable rooms, which the page does not carry (§6.14), or null. */
+    alsoRuns: string | null;
   }[];
   activeMemberCount: number;
 }
@@ -332,8 +349,29 @@ export async function loadCollectiveViewsForVenue(
     .in('collective_id', [...collectiveIds])
     .in('status', ['invited', 'active']);
 
+  // The engine's lifecycle state, read apart from the columns every older reader shares.
+  const { data: lifecycleRows } = await admin
+    .from('venue_collectives')
+    .select('id, service_model, paused_at, pending_host_venue_id, host_transfer_at, pending_adopted_venue_id')
+    .in('id', [...collectiveIds]);
+  const lifecycle = new Map(
+    (lifecycleRows ?? []).map((r) => [
+      r.id as string,
+      {
+        serviceModel: (r.service_model as string | null) ?? 'legacy_copies',
+        pausedAt: (r.paused_at as string | null) ?? null,
+        pendingHostVenueId: (r.pending_host_venue_id as string | null) ?? null,
+        hostTransferAt: (r.host_transfer_at as string | null) ?? null,
+        pendingAdoptedVenueId: (r.pending_adopted_venue_id as string | null) ?? null,
+      },
+    ]),
+  );
+
   const venueIdsToLoad = new Set<string>();
   for (const m of allMembers ?? []) venueIdsToLoad.add(m.venue_id as string);
+  for (const state of lifecycle.values()) {
+    if (state.pendingHostVenueId) venueIdsToLoad.add(state.pendingHostVenueId);
+  }
   // Host venues too, so we can resolve each collective's host "Any available
   // practitioner" setting (the combined page follows it).
   for (const c of collectives ?? []) venueIdsToLoad.add((c as VenueCollectiveRow).host_venue_id);
@@ -343,12 +381,16 @@ export async function loadCollectiveViewsForVenue(
   const venueSlugs: Record<string, string | null> = {};
   const venuePageConfigs: Record<string, BookingPageConfig | null> = {};
   const venueContacts: Record<string, NonNullable<CollectiveView['hostContact']>> = {};
+  const venueAlsoRuns: Record<string, string | null> = {};
   if (venueIdsToLoad.size > 0) {
     const { data: venues } = await admin
       .from('venues')
-      .select('id, name, slug, feature_flags, booking_page_config, phone, website_url, address, opening_hours')
+      .select(
+        `id, name, slug, feature_flags, booking_page_config, phone, website_url, address, opening_hours, ${OTHER_MODEL_COLUMNS}`,
+      )
       .in('id', [...venueIdsToLoad]);
     for (const v of venues ?? []) {
+      venueAlsoRuns[v.id as string] = otherBookingModelList(v as VenueModelColumns);
       const contact = v as { phone?: unknown; website_url?: unknown; address?: unknown; opening_hours?: unknown };
       venueContacts[v.id as string] = {
         phone: typeof contact.phone === 'string' && contact.phone.trim() ? contact.phone.trim() : null,
@@ -395,6 +437,7 @@ export async function loadCollectiveViewsForVenue(
         status: m.status as CollectiveMemberStatus,
         displayOrder: (m.display_order as number) ?? 0,
         soloPageBehavior: ((m.solo_page_behavior as SoloPageBehavior) ?? 'keep_live'),
+        alsoRuns: venueAlsoRuns[m.venue_id as string] ?? null,
       }))
       .sort((a, b) => a.displayOrder - b.displayOrder);
     const mine = members.find((m) => m.venueId === venueId);
@@ -433,6 +476,21 @@ export async function loadCollectiveViewsForVenue(
             soloPageBehavior:
               ((myRaw.solo_page_behavior as SoloPageBehavior) ?? 'keep_live'),
           }
+        : null,
+      serviceModel: lifecycle.get(row.id)?.serviceModel ?? 'legacy_copies',
+      pausedAt: lifecycle.get(row.id)?.pausedAt ?? null,
+      pendingHost: lifecycle.get(row.id)?.pendingHostVenueId
+        ? {
+            venueId: lifecycle.get(row.id)!.pendingHostVenueId!,
+            venueName: venueNames[lifecycle.get(row.id)!.pendingHostVenueId!] ?? 'A venue',
+            transferAt: lifecycle.get(row.id)!.hostTransferAt,
+          }
+        : null,
+      // A request stands only while that venue is still an active member.
+      pendingAdoptedVenueId: members.some(
+        (m) => m.venueId === lifecycle.get(row.id)?.pendingAdoptedVenueId && m.status === 'active',
+      )
+        ? lifecycle.get(row.id)!.pendingAdoptedVenueId
         : null,
       members,
       activeMemberCount: members.filter((m) => m.status === 'active').length,
@@ -473,15 +531,19 @@ export function selectReplacementHost(
 export async function reconcileCollective(
   admin: SupabaseClient,
   collectiveId: string,
-): Promise<{ removedVenueIds: string[]; dissolved: boolean; hostTransferredTo: string | null }> {
+  opts: { fromRender?: boolean } = {},
+): Promise<{ removedVenueIds: string[]; dissolved: boolean; hostTransferredTo: string | null; engine?: boolean }> {
   const removedVenueIds: string[] = [];
   const { data: collective } = await admin
     .from('venue_collectives')
-    .select('id, status, host_venue_id, page_mode')
+    .select('id, status, host_venue_id, page_mode, service_model')
     .eq('id', collectiveId)
     .maybeSingle();
   if (!collective || collective.status !== 'active') {
     return { removedVenueIds, dissolved: false, hostTransferredTo: null };
+  }
+  if (collective.service_model === 'replicas' || collective.service_model === 'migrating') {
+    return reconcileEngineCollective(admin, collectiveId, collective.host_venue_id as string, opts);
   }
 
   const { data: members } = await admin
@@ -547,9 +609,10 @@ export async function reconcileCollective(
         .eq('collective_id', collectiveId)
         .eq('status', 'invited');
     }
-    // No catalogue cleanup needed on dissolve: `status='dissolved'` takes the
-    // page offline, and the overrides are collective-scoped so every venue's own
-    // services are already pristine (plan §8.3, the non-destructive guarantee).
+    // Nothing here touches the venues' services: `status='dissolved'` takes the page offline and
+    // the collective-scoped overrides stop applying. That does not make each venue's catalogue as
+    // it was before joining: the older model's plain copies stay behind at the venues that received
+    // them, and the shared-services model releases its replicas through the engine (plan §6.7).
     return { removedVenueIds, dissolved: true, hostTransferredTo: null };
   }
 
@@ -591,6 +654,64 @@ export async function reconcileCollective(
   }
 
   return { removedVenueIds, dissolved: false, hostTransferredTo };
+}
+
+/**
+ * The reconcile on the shared-services model (plan §6.7, "reconcile off renders"; W7). A render never
+ * changes membership: the page shows only eligible venues whatever the rows say. A link change or the
+ * maintenance cron releases, through the engine and with the reason `link_ended`, each venue that no
+ * longer has full access with every other (the host's release pauses the collective instead), and a
+ * collective left with fewer than two venues ends. The engine's jobs send the notices (N18, N19), so
+ * the caller sends none of the older ones.
+ */
+async function reconcileEngineCollective(
+  admin: SupabaseClient,
+  collectiveId: string,
+  hostVenueId: string,
+  opts: { fromRender?: boolean },
+): Promise<{ removedVenueIds: string[]; dissolved: boolean; hostTransferredTo: string | null; engine: true }> {
+  const none = { removedVenueIds: [] as string[], dissolved: false, hostTransferredTo: null, engine: true as const };
+  if (opts.fromRender) return none;
+  const { data: members } = await admin
+    .from('venue_collective_members')
+    .select('id, venue_id')
+    .eq('collective_id', collectiveId)
+    .eq('status', 'active');
+  const active = (members ?? []).map((m) => ({ id: m.id as string, venueId: m.venue_id as string }));
+  const broken: typeof active = [];
+  try {
+    for (const member of active) {
+      const others = active.filter((m) => m.venueId !== member.venueId).map((m) => m.venueId);
+      if (!(await hasFullMutualLinks(admin, member.venueId, others))) broken.push(member);
+    }
+  } catch (err) {
+    console.warn('[reconcileCollective] aborting without changes, link read failed:', err);
+    return none;
+  }
+  const removedVenueIds: string[] = [];
+  for (const member of broken) {
+    const { error } = await admin.rpc('collective_release_member', {
+      p_member_id: member.id,
+      p_reason: 'link_ended',
+      p_actor_venue_id: null,
+      p_actor_user_id: null,
+    });
+    if (error) {
+      console.error('[reconcileCollective] release failed:', member.id, error.message);
+      continue;
+    }
+    if (member.venueId !== hostVenueId) removedVenueIds.push(member.venueId);
+  }
+  if (broken.length === 0) return none;
+  const { endIfBelowTwo, pendingReleaseFollowups } = await import('./replicas/below-two');
+  const dissolved = await endIfBelowTwo(admin, collectiveId);
+  try {
+    const { drainReleaseFollowups } = await import('./replicas/release-followups');
+    await drainReleaseFollowups(admin, { operationIds: await pendingReleaseFollowups(admin, collectiveId) });
+  } catch (err) {
+    console.error('[reconcileCollective] release follow-ups will run from the cron:', err);
+  }
+  return { removedVenueIds, dissolved, hostTransferredTo: null, engine: true };
 }
 
 /**
@@ -690,10 +811,12 @@ export async function reconcileCollectivesAfterLinkChange(
       const beforeVenues = (beforeRows ?? []).map((m) => m.venue_id as string);
       const collectiveName = (collectiveRow?.name as string) ?? 'a venue collective';
 
-      const { removedVenueIds, dissolved, hostTransferredTo } = await reconcileCollective(
+      const { removedVenueIds, dissolved, hostTransferredTo, engine } = await reconcileCollective(
         admin,
         collectiveId,
       );
+      // On the shared-services model the engine's own jobs tell everyone (N18, N19).
+      if (engine) continue;
       if (removedVenueIds.length === 0 && !dissolved && !hostTransferredTo) continue;
 
       await Promise.allSettled(
@@ -930,7 +1053,7 @@ export async function loadPublicCollective(
   if (collective.status !== 'active') return null;
 
   // Re-verify links still hold; this may dissolve the collective.
-  const { dissolved } = await reconcileCollective(admin, collective.id);
+  const { dissolved } = await reconcileCollective(admin, collective.id, { fromRender: true });
   if (dissolved) return null;
 
   const { data: memberRows } = await admin

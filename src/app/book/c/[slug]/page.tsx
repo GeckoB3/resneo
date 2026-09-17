@@ -1,11 +1,12 @@
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { loadCollectiveBrandingBySlug } from '@/lib/linked-accounts/collectives';
+import { collectivePageMetadata } from '@/lib/booking/booking-page-metadata';
 import {
   loadCollectivePageView,
   CollectiveUnavailable,
   CollectivePageBody,
+  DissolvedCollectivePage,
 } from './collective-page-view';
 
 export const dynamic = 'force-dynamic';
@@ -16,22 +17,9 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const admin = getSupabaseAdminClient();
-  // §16.1 #11 — metadata must be read-only. `loadCollectivePageView` runs a
-  // reconcile (a write that can dissolve), so the page body owns that single
-  // reconcile and the metadata pass uses a plain read instead.
-  const known = await loadCollectiveBrandingBySlug(admin, slug);
-  if (!known) return { title: 'Booking page not found' };
-  if (known.status !== 'active') return { title: known.name };
-  return {
-    title: `${known.name}: Book online`,
-    // The host writes the About text in the page editor; the legacy branding
-    // description has no UI, so it is only a fallback.
-    description:
-      known.about ??
-      known.branding.description ??
-      `Book with the venues of the ${known.name} collective.`,
-  };
+  // §16.1 #11: metadata is read-only. `loadCollectivePageView` runs a reconcile, so the page body
+  // owns that and this pass reads (D48, SEO-01).
+  return collectivePageMetadata(getSupabaseAdminClient(), slug);
 }
 
 export default async function CollectiveBookingPage({
@@ -42,6 +30,7 @@ export default async function CollectiveBookingPage({
   const { slug } = await params;
   const view = await loadCollectivePageView(getSupabaseAdminClient(), slug);
   if (view.status === 'notfound') notFound();
+  if (view.status === 'dissolved') return <DissolvedCollectivePage page={view.page} />;
   if (view.status === 'unavailable') {
     return <CollectiveUnavailable name={view.name} branding={view.branding} />;
   }

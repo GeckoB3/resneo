@@ -40,6 +40,21 @@ function sourceOf(relativePath: string): string {
   return readFileSync(path.join(process.cwd(), relativePath), 'utf8');
 }
 
+describe('visit create routes require staff for a staff source (CB-23, CB-26)', () => {
+  it.each(VISIT_ROUTES)('%s resolves a staff actor for phone and walk-in', (route) => {
+    const source = sourceOf(route);
+    expect(source).toMatch(/if \(source === 'phone' \|\| source === 'walk-in'\) \{/);
+    expect(source).toMatch(/resolveStaffBookingActor\s*\(/);
+    expect(source).toMatch(/if \(!actor\.ok\) \{\s*return NextResponse\.json/);
+  });
+
+  it.each(VISIT_ROUTES)('%s stamps the staff member on each row', (route) => {
+    const source = sourceOf(route);
+    expect(source).toMatch(/created_by_staff_id: staffActor\?\.staff\.id \?\? null/);
+    expect(source).toContain('created_by_linked_venue_id:');
+  });
+});
+
 describe('visit create routes honour staff charge discretion', () => {
   it.each(VISIT_ROUTES)('%s accepts require_deposit and require_card_hold', (route) => {
     const source = sourceOf(route);

@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { isParked, loadBookableServiceIds } from '@/lib/linked-accounts/replicas/parking';
+import { loadStaffOnlyServiceIds } from '@/lib/booking/staff-only-services';
+import type { RpcClient } from '@/lib/linked-accounts/replicas/crons';
 import { computeAvailability, fetchEngineInput } from '@/lib/availability';
 import { AVAILABILITY_SETUP_REQUIRED_MESSAGE } from '@/lib/availability/availability-errors';
 import { resolveVenueMode } from '@/lib/venue-mode';
@@ -651,6 +654,20 @@ async function handleAppointmentAvailability(
     const offer = await loadActiveWaitlistOfferForGuestAccess(supabase, waitlistOfferId, venueId);
     if (offer) {
       skipPastSlotFilter = true;
+    }
+  }
+
+  // D2: a parked service offers no slots for a new booking. Moving an existing booking
+  // (exclude_booking_id) is not a new booking, so its service is not filtered here.
+  const requestedServiceIds = serviceChain ? serviceChain.map((seg) => seg.service_id) : [serviceId];
+  if (!excludeBookingId && requestedServiceIds.some(Boolean)) {
+    const [bookable, staffOnly] = await Promise.all([
+      loadBookableServiceIds(supabase as unknown as RpcClient, venueId),
+      // "Staff bookings only": guests get no slots for it (plan §6.6).
+      loadStaffOnlyServiceIds(supabase, requestedServiceIds.filter((id): id is string => Boolean(id))),
+    ]);
+    if (requestedServiceIds.some((id) => isParked(bookable, id) || (id && staffOnly.has(id)))) {
+      return NextResponse.json({ date, venue_id: venueId, practitioners: [], any_available: anyAvailable || undefined });
     }
   }
 

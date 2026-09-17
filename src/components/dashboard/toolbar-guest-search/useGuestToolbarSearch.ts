@@ -8,7 +8,11 @@ const SEARCH_DEBOUNCE_MS = 280;
 const MIN_QUERY_LENGTH = 2;
 const RESULT_LIMIT = 10;
 
-export function useGuestToolbarSearch(query: string) {
+/**
+ * `scope: 'collective'` searches every venue of the live collective this venue belongs to (D41,
+ * contract 16); the server refuses it outside one, and the search then falls back to this venue.
+ */
+export function useGuestToolbarSearch(query: string, scope: 'venue' | 'collective' = 'venue') {
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [results, setResults] = useState<GuestListRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -38,11 +42,17 @@ export function useGuestToolbarSearch(query: string) {
       sort: 'name_asc',
       page: '0',
       limit: String(RESULT_LIMIT),
+      ...(scope === 'collective' ? { scope: 'collective' } : {}),
     });
 
     void (async () => {
       try {
-        const res = await fetch(`/api/venue/guests?${params.toString()}`);
+        let res = await fetch(`/api/venue/guests?${params.toString()}`);
+        if (res.status === 403 && scope === 'collective') {
+          // No longer part of a live collective: this venue's own clients only.
+          params.delete('scope');
+          res = await fetch(`/api/venue/guests?${params.toString()}`);
+        }
         const data = await readResponseJson<{ guests?: GuestListRow[]; error?: string }>(res);
         if (seq !== requestSeq.current) return;
         if (!res.ok) {
@@ -62,7 +72,7 @@ export function useGuestToolbarSearch(query: string) {
         }
       }
     })();
-  }, [debouncedQuery]);
+  }, [debouncedQuery, scope]);
 
   const showHint = query.trim().length > 0 && query.trim().length < MIN_QUERY_LENGTH;
   const showEmpty =

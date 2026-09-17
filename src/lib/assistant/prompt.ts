@@ -106,6 +106,17 @@ export function buildContextBlock(ctx: AssistantVenueContext): string {
     if (t.staff) words.push(`"${t.staff}" for staff`);
     if (words.length) lines.push(`- Words this venue uses: ${words.join(', ')}`);
   }
+  if (ctx.collective) {
+    const c = ctx.collective;
+    lines.push(
+      c.role === 'host'
+        ? `- Venue collective: hosts "${c.name}", so it manages the collective's services and booking page`
+        : `- Venue collective: a member of "${c.name}"; the host manages the collective's services and booking page, and this venue manages its own calendars, hours and clients`,
+    );
+    if (c.sharedServices) {
+      lines.push("- The collective shares services: the host's services run at every venue, and a member's other services are parked while it is a member");
+    }
+  }
   lines.push(`- Using: ${ctx.client === 'app' ? 'the ResNeo app' : 'the web dashboard'}`);
   if (ctx.page) lines.push(`- Screen the question was asked from: ${ctx.page}`);
   lines.push(`- Today: ${ctx.today} (${ctx.timezone})`);

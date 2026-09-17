@@ -23,6 +23,8 @@ const KNOWN_CRON_JOBS: Array<{ name: string; schedule: string }> = [
   { name: 'baseline-metrics-snapshot', schedule: 'Weekly Sun 03:00' },
   { name: 'sms-overage-billing', schedule: 'Monthly 1st 02:00' },
   { name: 'sales-monthly', schedule: 'Monthly 1st 04:00' },
+  { name: 'collective-replicate', schedule: 'Every 5 min' },
+  { name: 'collective-verify', schedule: 'Daily 06:00' },
 ];
 
 /**

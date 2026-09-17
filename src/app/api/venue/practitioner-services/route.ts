@@ -14,15 +14,25 @@ import {
 } from '@/lib/venue/service-calendar-removal';
 import { z } from 'zod';
 import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
+import {
+  sameIdSet,
+  setCalendarServiceAssignments,
+  STALE_CALENDAR_SERVICES_MESSAGE,
+} from '@/lib/venue/calendar-service-assignment-writes';
+import { apiError } from '@/lib/api/error-codes';
 
 const syncSchema = z.object({
   practitioner_id: z.string().uuid(),
   service_ids: z.array(z.string().uuid()),
+  /** The calendar's service ids as the client loaded them. A mismatch answers 412 and writes nothing. */
+  expected_service_ids: z.array(z.string().uuid()).optional(),
 });
 
 /**
  * PUT /api/venue/practitioner-services
- * Replaces all service links for a practitioner calendar with the provided set.
+ * Sets which services a calendar offers. The stored set is changed by a diff in one transaction,
+ * so kept rows keep their id and custom values; with `expected_service_ids` a save made from a
+ * stale copy answers 412 STALE_RESOURCE instead of undoing someone else's change.
  * For `unified_scheduling`, `practitioner_id` is a `unified_calendars.id`.
  * Removing a service from this calendar does not assign it elsewhere; links on other calendars are unchanged.
  *
@@ -31,6 +41,9 @@ const syncSchema = z.object({
  * answers 409 with those bookings listed so the dashboard can show them and offer to move
  * them; `?acknowledge_affected_bookings=true` then carries the same save through.
  */
+/** How recent another venue's assignment must be for an unversioned full-set save to be stale. */
+const RECENT_OTHER_VENUE_MS = 24 * 60 * 60 * 1000;
+
 export async function PUT(request: NextRequest) {
   try {
     const supabase = await createVenueRouteClient(request);
@@ -43,7 +56,7 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
-    const { practitioner_id, service_ids } = parsed.data;
+    const { practitioner_id, service_ids, expected_service_ids } = parsed.data;
     const admin = getSupabaseAdminClient();
     const acknowledgeAffectedBookings =
       request.nextUrl.searchParams.get('acknowledge_affected_bookings') === 'true';
@@ -78,21 +91,43 @@ export async function PUT(request: NextRequest) {
         }
       }
 
-      const { data: existingRows } = await admin
+      const { data: existingRows, error: existingErr } = await admin
         .from('calendar_service_assignments')
-        .select('*')
+        .select('service_item_id, updated_at, updated_by_venue_id')
         .eq('calendar_id', practitioner_id);
+      if (existingErr) {
+        console.error('PUT /api/venue/practitioner-services (USE) read failed:', existingErr);
+        return NextResponse.json({ error: 'Failed to save service links' }, { status: 500 });
+      }
 
-      const preserve = new Map(
-        (existingRows ?? []).map((r) => {
-          const row = r as { service_item_id: string; custom_price_pence: number | null; custom_duration_minutes: number | null };
-          return [row.service_item_id, row] as const;
-        }),
+      const previousServiceIds = new Set(
+        (existingRows ?? []).map((r) => (r as { service_item_id: string }).service_item_id),
       );
-
-      const previousServiceIds = new Set(preserve.keys());
+      if (expected_service_ids && !sameIdSet([...previousServiceIds], expected_service_ids)) {
+        return NextResponse.json(apiError(STALE_CALENDAR_SERVICES_MESSAGE, 'STALE_RESOURCE'), { status: 412 });
+      }
       const nextServiceIds = new Set(effectiveServiceIds);
       const removedServiceIds = [...previousServiceIds].filter((sid) => !nextServiceIds.has(sid));
+      // An older app sends the whole set with no expected ids. If that set would drop a service
+      // another venue (the collective's host) gave this calendar in the last day, the app's copy is
+      // almost certainly from before it: answer 412 rather than silently undoing it (APP-02).
+      if (!expected_service_ids && removedServiceIds.length > 0) {
+        const cutoff = Date.now() - RECENT_OTHER_VENUE_MS;
+        const removed = new Set(removedServiceIds);
+        const recentByOthers = (existingRows ?? []).some((row) => {
+          const r = row as { service_item_id: string; updated_at?: string | null; updated_by_venue_id?: string | null };
+          return (
+            removed.has(r.service_item_id) &&
+            Boolean(r.updated_by_venue_id) &&
+            r.updated_by_venue_id !== staff.venue_id &&
+            Boolean(r.updated_at) &&
+            Date.parse(r.updated_at as string) > cutoff
+          );
+        });
+        if (recentByOthers) {
+          return NextResponse.json(apiError(STALE_CALENDAR_SERVICES_MESSAGE, 'STALE_RESOURCE'), { status: 412 });
+        }
+      }
       if (removedServiceIds.length > 0 && !acknowledgeAffectedBookings) {
         const impact = await findBookingsAffectedByRemovingServicesUnified(admin, {
           venueId: staff.venue_id,
@@ -107,28 +142,24 @@ export async function PUT(request: NextRequest) {
         }
       }
 
-      await admin.from('calendar_service_assignments').delete().eq('calendar_id', practitioner_id);
-
-      if (effectiveServiceIds.length > 0) {
-        const links = effectiveServiceIds.map((sid) => {
-          const prev = preserve.get(sid) as
-            | { custom_price_pence: number | null; custom_duration_minutes: number | null }
-            | undefined;
-          return {
-            calendar_id: practitioner_id,
-            service_item_id: sid,
-            custom_price_pence: prev?.custom_price_pence ?? null,
-            custom_duration_minutes: prev?.custom_duration_minutes ?? null,
-          };
-        });
-        const { error } = await admin.from('calendar_service_assignments').insert(links);
-        if (error) {
-          console.error('PUT /api/venue/practitioner-services (USE) insert failed:', error);
-          return NextResponse.json({ error: 'Failed to save service links' }, { status: 500 });
+      const written = await setCalendarServiceAssignments(admin, {
+        venueId: staff.venue_id,
+        calendarId: practitioner_id,
+        serviceItemIds: effectiveServiceIds,
+        expectedServiceItemIds: expected_service_ids ?? null,
+      });
+      if (!written.ok) {
+        if (written.reason === 'stale') {
+          return NextResponse.json(apiError(STALE_CALENDAR_SERVICES_MESSAGE, 'STALE_RESOURCE'), { status: 412 });
         }
+        if (written.reason === 'not_at_venue') {
+          return NextResponse.json({ error: 'One or more services were not found at this venue.' }, { status: 403 });
+        }
+        console.error('PUT /api/venue/practitioner-services (USE) write failed:', written.message);
+        return NextResponse.json({ error: 'Failed to save service links' }, { status: 500 });
       }
 
-      return NextResponse.json({ success: true });
+      return NextResponse.json({ success: true, added: written.added, removed: written.removed });
     }
 
     const { data: prac } = await admin

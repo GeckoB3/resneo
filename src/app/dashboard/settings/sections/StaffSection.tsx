@@ -894,8 +894,8 @@ export function StaffSection({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-xs text-slate-500">
               <div><span className="font-medium text-purple-700">Admin:</span> Full access to all settings, staff management, reports, and bookings</div>
               <div>
-                <span className="font-medium text-slate-700">Staff:</span> Work in the dashboard for day-to-day
-                operations, schedule, bookings, and guest details for the calendars you assign below
+                <span className="font-medium text-slate-700">Staff:</span> Work with every booking and guest in
+                the dashboard, and set up hours and services for the calendars you assign below
               </div>
             </div>
             {isAdmin && (

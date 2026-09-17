@@ -13,23 +13,30 @@
  */
 
 import type { ServiceCategoryRef } from '@/lib/booking/service-categories';
+import { hostSignInRequirement } from '@/lib/linked-accounts/replicas/collective-sign-in';
+import type { PublicCatalogueProvider } from '@/lib/linked-accounts/catalogue';
+import type { ProviderExclusion } from '@/lib/linked-accounts/replicas/derived-catalogue';
+import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 import { inheritCollectivePageConfigFromHost } from '@/lib/linked-accounts/collective-page-config';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { VenuePublic } from '@/components/booking/types';
+import type { BookingModel } from '@/types/booking-models';
 import type { BookingPageConfig } from '@/lib/booking/booking-page-theme';
 import type { BookingPagePublicService } from '@/lib/booking/booking-page-tabs';
 import {
+  calendarServiceTermsKey,
   invalidatePublicCombinedCatalogueMemo,
   loadPublicCombinedCatalogue,
   loadVenueCatalogueData,
 } from './catalogue';
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
 import { mergeVenueTerminology } from '@/lib/dashboard/merge-venue-terminology';
+import { mapVenueFeatureFlagsForPublic } from '@/lib/booking/venue-public-feature-flags';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { loadVariantsForServices } from '@/lib/venue/service-variants';
 import { variantToCatalog, type AppointmentCatalogVariant } from '@/lib/availability/appointment-catalog';
 import { loadAddonGroupsForServices } from '@/lib/addons/addon-resolution';
-import { parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
+import { canonicalServiceShape, parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
 import { entityBookingWindowFromRow } from '@/lib/booking/entity-booking-window';
 import type {
   AppointmentCatalogAddonGroup,
@@ -55,6 +62,18 @@ async function loadCollectiveRow(admin: SupabaseClient, collectiveId: string): P
     .eq('id', collectiveId)
     .maybeSingle();
   return (data as CollectiveRow | null) ?? null;
+}
+
+/**
+ * The booking model each kind of collective offering is served by (D44). The discriminator is
+ * `collective_service_items.entity_type`, which allows only 'service' today, so the page lists one
+ * model; a later kind adds its row here and the page's model tabs follow.
+ */
+export const COLLECTIVE_ENTITY_MODELS = { service: 'unified_scheduling' } as const satisfies Record<string, BookingModel>;
+
+/** The synthetic venue's model list, derived from the offering kinds rather than written out. */
+export function collectiveBookingModels(): BookingModel[] {
+  return [...new Set<BookingModel>(Object.values(COLLECTIVE_ENTITY_MODELS))];
 }
 
 /**
@@ -115,14 +134,19 @@ export async function loadCollectiveVenuePublic(
   // enforces that venue's "require an account to book" setting. Surface the gate
   // on the page whenever any bookable member requires it, so customers sign in
   // up front instead of being refused at the final step.
-  let requireAccountLogin = false;
+  // D32: on shared services the host's setting alone decides; the older model keeps the rule above.
+  const hostSignIn = await hostSignInRequirement(admin, col.id);
+  let requireAccountLogin = hostSignIn ?? false;
   if (memberVenueIds.length > 0) {
     const { data: memberRows } = await admin
       .from('venues')
       .select('booking_page_config, require_account_login_for_bookings')
       .in('id', memberVenueIds);
     for (const row of memberRows ?? []) {
-      if ((row as { require_account_login_for_bookings?: boolean }).require_account_login_for_bookings) {
+      if (
+        hostSignIn === null &&
+        (row as { require_account_login_for_bookings?: boolean }).require_account_login_for_bookings
+      ) {
         requireAccountLogin = true;
       }
       const tp = ((row.booking_page_config as BookingPageConfig | null) ?? {}).team_profiles ?? {};
@@ -161,7 +185,7 @@ export async function loadCollectiveVenuePublic(
     opening_hours: (host?.opening_hours as VenuePublic['opening_hours']) ?? null,
     timezone: col.timezone ?? 'Europe/London',
     booking_model: 'unified_scheduling',
-    active_booking_models: ['unified_scheduling'],
+    active_booking_models: collectiveBookingModels(),
     enabled_models: [],
     // The combined page is always an appointments page, so the host's words are
     // resolved against that model rather than passed through raw: a host that
@@ -171,8 +195,13 @@ export async function loadCollectiveVenuePublic(
     booking_paused: !bookable,
     require_account_login_for_bookings: requireAccountLogin,
     is_collective: true,
+    collective_venue_count: memberVenueIds.length,
+    // The host's full resolved set (D32, D43): its waitlist, self-reschedule, staff-first and
+    // "Any available" settings and order are the page's, as they are on its own page.
     feature_flags: {
+      ...mapVenueFeatureFlagsForPublic(host?.feature_flags ?? {}),
       resolved: {
+        ...mapVenueFeatureFlagsForPublic(host?.feature_flags ?? {})?.resolved,
         any_available_practitioner: hostAnyAvailablePractitioner,
         staff_first_booking_flow: hostStaffFirstBookingFlow,
       },
@@ -224,6 +253,13 @@ export interface CollectiveCatalogService {
   source_service_id: string;
   /** Where the service is delivered; a `client_address` service collects an address. */
   location_type?: import('@/types/booking-models').ServiceLocationType;
+  /**
+   * Staff only: why a guest cannot book this calendar right now, in plain words (§6.6). Staff may
+   * still book it. Absent on the public catalogue, which leaves those calendars out entirely.
+   */
+  staff_note?: string;
+  /** Staff only: the reason behind `staff_note`, for the create routes (D33 refuses `behind`). */
+  staff_exclusion?: ProviderExclusion;
 }
 
 export interface CollectiveCatalogPractitioner {
@@ -237,7 +273,25 @@ export interface CollectiveCatalogPractitioner {
    * list and qualifies duplicate names by folding itself into {@link name}.
    */
   owning_venue_name: string;
+  /** The owning venue's address, so the guest is told who they are booking with (PUB-03). */
+  owning_venue_address: string;
   services: CollectiveCatalogService[];
+}
+
+/** Why a guest cannot book this calendar right now, for staff eyes only (§6.6). */
+export function staffNoteForExclusion(reason: ProviderExclusion, venueName: string): string {
+  switch (reason) {
+    case 'payments':
+      return `Card payments are not set up at ${venueName}, so take payment in person.`;
+    case 'forms':
+      return `Forms are switched off at ${venueName}, so its form cannot be collected there.`;
+    case 'behind':
+      return collectiveCopy('staff.error.updating', { venue: venueName });
+    case 'suspended':
+      return `${venueName} is suspended in the collective, so guests cannot book it there.`;
+    case 'staff_only':
+      return 'This service is staff bookings only, so guests cannot book it themselves.';
+  }
 }
 
 const DEFAULT_CANCELLATION_NOTICE_HOURS = 24;
@@ -278,9 +332,10 @@ export function invalidateCollectiveCatalogMemo(collectiveId: string): void {
 export async function loadCollectiveAppointmentCatalog(
   admin: SupabaseClient,
   collectiveId: string,
-  options?: { includeHiddenAddons?: boolean; everyCalendar?: boolean },
+  options?: { includeHiddenAddons?: boolean; everyCalendar?: boolean; includeExcludedForStaff?: boolean },
 ): Promise<CollectiveAppointmentCatalog> {
-  const key = `${collectiveId}|${options?.includeHiddenAddons ? 1 : 0}|${options?.everyCalendar ? 1 : 0}`;
+  // The staff variants must never be served to the public, so every option is part of the key.
+  const key = `${collectiveId}|${options?.includeHiddenAddons ? 1 : 0}|${options?.everyCalendar ? 1 : 0}|${options?.includeExcludedForStaff ? 1 : 0}`;
   const now = Date.now();
   const hit = catalogMemo.get(key);
   if (hit && now - hit.at < CATALOG_MEMO_TTL_MS) return hit.value;
@@ -305,6 +360,11 @@ async function loadCollectiveAppointmentCatalogUncached(
      * `assigned: false` where the calendar itself is not a provider.
      */
     everyCalendar?: boolean;
+    /**
+     * Staff of a member venue also see the calendars a guest cannot book right now, each with a
+     * `staff_note` saying why (§6.6). The public build never passes this.
+     */
+    includeExcludedForStaff?: boolean;
   },
 ): Promise<{ practitioners: CollectiveCatalogPractitioner[]; categories: ServiceCategoryRef[] }> {
   const catalogue = await loadPublicCombinedCatalogue(admin, collectiveId);
@@ -359,6 +419,9 @@ async function loadCollectiveAppointmentCatalogUncached(
         buffer: number;
         deposit: number | null;
         processing: ProcessingTimeBlock[];
+        /** The service's own length and price, for a calendar that is not assigned it. */
+        durationMinutes: number | null;
+        pricePence: number | null;
         paymentRequirement: ClassPaymentRequirement;
         cancellationNoticeHours: number;
       }
@@ -385,17 +448,23 @@ async function loadCollectiveAppointmentCatalogUncached(
         admin
           .from(venueIsUnified[venueId] ? 'service_items' : 'appointment_services')
           .select(
-            'id, buffer_minutes, deposit_pence, processing_time_blocks, payment_requirement, cancellation_notice_hours',
+            'id, duration_minutes, price_pence, buffer_minutes, deposit_pence, processing_time_blocks, payment_requirement, cancellation_notice_hours',
           )
           .in('id', ids),
       ]);
       variantsByVenue[venueId] = variantMap;
       addonsByVenue[venueId] = addonMap;
       for (const r of metaRows.data ?? []) {
+        const canon = canonicalServiceShape({
+          durationMinutes: (r.duration_minutes as number | null) ?? 0,
+          processingBlocks: parseProcessingTimeBlocksFromDb(r.processing_time_blocks),
+        });
         metaByVenue[venueId].set(r.id as string, {
           buffer: (r.buffer_minutes as number) ?? 0,
           deposit: (r.deposit_pence as number | null) ?? null,
-          processing: parseProcessingTimeBlocksFromDb(r.processing_time_blocks),
+          processing: canon.processingBlocks,
+          durationMinutes: r.duration_minutes == null ? null : canon.durationMinutes,
+          pricePence: (r.price_pence as number | null) ?? null,
           paymentRequirement:
             ((r as { payment_requirement?: ClassPaymentRequirement | null })
               .payment_requirement as ClassPaymentRequirement | null) ?? 'none',
@@ -430,6 +499,7 @@ async function loadCollectiveAppointmentCatalogUncached(
         name,
         owning_venue_id: venueId,
         owning_venue_name: '',
+        owning_venue_address: '',
         services: [],
       };
       byCalendar.set(calendarId, entry);
@@ -438,7 +508,16 @@ async function loadCollectiveAppointmentCatalogUncached(
   };
 
   for (const [itemIndex, item] of catalogue.items.entries()) {
-    for (const provider of item.providers) {
+    const excludedHere = options?.includeExcludedForStaff ? catalogue.excludedByItem?.[item.id] ?? [] : [];
+    const providersForBuild: { provider: PublicCatalogueProvider; note?: string; reason?: ProviderExclusion }[] = [
+      ...item.providers.map((provider) => ({ provider })),
+      ...excludedHere.map(({ provider, reason }) => ({
+        provider,
+        reason,
+        note: staffNoteForExclusion(reason, provider.venueName),
+      })),
+    ];
+    for (const { provider, note, reason } of providersForBuild) {
       const data = venueData[provider.venueId];
       if (!data) continue;
       const calendarIds = provider.practitionerId
@@ -453,13 +532,17 @@ async function loadCollectiveAppointmentCatalogUncached(
         const entry = ensure(calendarId, name, provider.venueId);
         if (entry.services.some((s) => s.id === item.id)) continue; // calendar already lists this offering
         const meta = metaByVenue[provider.venueId]?.get(provider.sourceServiceId);
+        // This calendar's own price and length (its custom values, else the service's). The
+        // provider's own figures are a summary across calendars and must not be charged (CB-01).
+        const terms = data.calendarServiceTerms.get(calendarServiceTermsKey(calendarId, provider.sourceServiceId));
         // Mirror the single-venue catalog's card-hold passthrough: 'card_hold'
         // reaches the guest only when a positive fee exists (service or variant
         // level); otherwise it degrades to 'none', matching what the create route
         // will actually charge.
         const rawPayReq = meta?.paymentRequirement ?? 'none';
+        const depositPence = terms ? terms.depositPence : meta?.deposit ?? null;
         const cardHoldFeeConfigured =
-          (meta?.deposit ?? 0) > 0 ||
+          (depositPence ?? 0) > 0 ||
           activeVariants(provider.venueId, provider.sourceServiceId).some(
             (v) => (v.deposit_pence ?? 0) > 0,
           );
@@ -467,13 +550,15 @@ async function loadCollectiveAppointmentCatalogUncached(
           rawPayReq === 'card_hold' ? (cardHoldFeeConfigured ? 'card_hold' : 'none') : rawPayReq;
         entry.services.push({
           ...(options?.everyCalendar ? { assigned: true } : {}),
+          ...(note ? { staff_note: note } : {}),
+          ...(reason ? { staff_exclusion: reason } : {}),
           id: item.id,
           name: item.name,
           description: item.description,
-          duration_minutes: provider.durationMinutes ?? 0,
-          buffer_minutes: meta?.buffer ?? 0,
-          price_pence: provider.pricePence,
-          deposit_pence: meta?.deposit ?? null,
+          duration_minutes: (terms ? terms.durationMinutes : provider.durationMinutes) ?? 0,
+          buffer_minutes: terms ? terms.bufferMinutes : meta?.buffer ?? 0,
+          price_pence: terms ? terms.pricePence : provider.pricePence,
+          deposit_pence: depositPence,
           payment_requirement: paymentRequirement,
           // `catalogue.items` is already sorted (host display_order → member venue
           // service order → name), so the index is the display position.
@@ -483,7 +568,7 @@ async function loadCollectiveAppointmentCatalogUncached(
             meta?.cancellationNoticeHours ?? DEFAULT_CANCELLATION_NOTICE_HOURS,
           variants: activeVariants(provider.venueId, provider.sourceServiceId).map(variantToCatalog),
           addon_groups: addonGroups(provider.venueId, provider.sourceServiceId),
-          processing_time_blocks: meta?.processing ?? [],
+          processing_time_blocks: terms ? terms.processingBlocks : meta?.processing ?? [],
           any_available: anyAvailableByItem.get(item.id) ?? true,
           source_service_id: provider.sourceServiceId,
         });
@@ -524,9 +609,10 @@ async function loadCollectiveAppointmentCatalogUncached(
             id: item.id,
             name: item.name,
             description: item.description,
-            duration_minutes: provider.durationMinutes ?? 0,
+            // Not assigned here, so the override books the service's own terms.
+            duration_minutes: meta?.durationMinutes ?? provider.durationMinutes ?? 0,
             buffer_minutes: meta?.buffer ?? 0,
-            price_pence: provider.pricePence,
+            price_pence: meta ? meta.pricePence : provider.pricePence,
             deposit_pence: meta?.deposit ?? null,
             payment_requirement: paymentRequirement,
             sort_order: itemIndex,
@@ -548,11 +634,16 @@ async function loadCollectiveAppointmentCatalogUncached(
   // Every calendar carries its venue's name: the picker shows it under each
   // person, and duplicate names still fold it into the name itself so the
   // downstream summaries and banners stay unambiguous.
-  const { data: venueRows } = await admin.from('venues').select('id, name').in('id', venueIds);
+  const { data: venueRows } = await admin.from('venues').select('id, name, address').in('id', venueIds);
   const venueName: Record<string, string> = {};
-  for (const v of venueRows ?? []) venueName[v.id as string] = (v.name as string) ?? '';
+  const venueAddress: Record<string, string> = {};
+  for (const v of venueRows ?? []) {
+    venueName[v.id as string] = (v.name as string) ?? '';
+    venueAddress[v.id as string] = ((v.address as string | null) ?? '').trim();
+  }
   for (const p of result) {
     p.owning_venue_name = venueName[p.owning_venue_id] ?? '';
+    p.owning_venue_address = venueAddress[p.owning_venue_id] ?? '';
   }
 
   // Venue-qualify duplicate staff names (e.g. two "Andrew"s, one per venue) so

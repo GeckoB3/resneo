@@ -2,7 +2,7 @@
 
 import { Skeleton } from '@/components/ui/Skeleton';
 
-export type TabBarMobileLayout = 'single-row-scroll' | 'two-row-scroll';
+export type TabBarMobileLayout = 'single-row-scroll' | 'two-row-scroll' | 'select';
 
 type TabBarTab<T extends string> = { id: T; label: string; description?: string };
 
@@ -14,6 +14,7 @@ export function TabBar<T extends string>({
   mobileNote = null,
   density = 'default',
   mobileLayout = 'single-row-scroll',
+  mobileSelectLabel = 'Section',
 }: {
   tabs: readonly TabBarTab<T>[];
   value: T;
@@ -22,8 +23,10 @@ export function TabBar<T extends string>({
   /** Optional short hint shown above the tabs on mobile only. Off by default. */
   mobileNote?: string | null;
   density?: 'default' | 'compact';
-  /** Mobile (&lt; sm): one scrollable row, or two rows with a single horizontal scroll. */
+  /** Mobile (&lt; sm): one scrollable row, two rows with a single horizontal scroll, or a picker. */
   mobileLayout?: TabBarMobileLayout;
+  /** With `mobileLayout="select"`: the label beside the picker on a phone. */
+  mobileSelectLabel?: string;
 }) {
   const active = tabs.find((t) => t.id === value);
   const isCompact = density === 'compact';
@@ -79,7 +82,31 @@ export function TabBar<T extends string>({
           {mobileNote}
         </p>
       ) : null}
-      <div className="overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch] sm:overflow-visible">
+      {mobileLayout === 'select' ? (
+        // Phones: every section in one picker, so nothing is clipped off the edge and the
+        // strip stays one line tall while it is pinned to the top.
+        <label className="flex items-center gap-2 sm:hidden">
+          <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            {mobileSelectLabel}
+          </span>
+          <select
+            value={value}
+            onChange={(e) => onChange(e.target.value as T)}
+            className="min-h-10 w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-brand-800 shadow-sm"
+          >
+            {tabs.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+      <div
+        className={`overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch] sm:overflow-visible ${
+          mobileLayout === 'select' ? 'hidden sm:block' : ''
+        }`}
+      >
         {useTwoRowMobile ? (
           <>
             <div

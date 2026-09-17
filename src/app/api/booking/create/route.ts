@@ -2,6 +2,13 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import { createRouteHandlerClient } from '@/lib/supabase/server';
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { parkedServiceRefusal } from '@/lib/linked-accounts/replicas/parking';
+import { isStaffBookingSource, loadStaffOnlyServiceIds } from '@/lib/booking/staff-only-services';
+import { apiError } from '@/lib/api/error-codes';
+import { collectiveDbError } from '@/lib/linked-accounts/replicas/db-errors';
+import { bookingRequiresSignIn } from '@/lib/linked-accounts/replicas/collective-sign-in';
+import { notifyPageBooking } from '@/lib/linked-accounts/replicas/collective-notices';
+import type { RpcClient } from '@/lib/linked-accounts/replicas/crons';
 import {
   cancelBookingAfterPaymentFailure,
   CARD_HOLD_SETUP_FAILED_NOTE,
@@ -105,8 +112,8 @@ import { membershipCoversClassType } from '@/lib/class-commerce/membership-allow
 import { membershipUnlimitedCoversClassType } from '@/lib/class-commerce/membership-class-access';
 import { consumeMembershipAllowanceForBooking } from '@/lib/class-commerce/consume-membership-allowance';
 import { formatGuestDisplayName, normaliseGuestNamePart } from '@/lib/guests/name';
-import { resolveCollectiveServiceOverride } from '@/lib/linked-accounts/collective-booking-override';
-import { isCollectiveId, resolveCombinedBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
+import { resolveCollectiveServiceAttribution } from '@/lib/linked-accounts/collective-booking-override';
+import { isCollectiveId, resolveCollectiveBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
 import {
   completeWaitlistEntryAfterGuestBooking,
   loadActiveWaitlistOfferForGuestAccess,
@@ -210,25 +217,32 @@ export async function POST(request: NextRequest) {
     // and resolve the chosen (offering, calendar) to the real owning venue + source
     // service so the booking is created normally and the effective price/duration
     // override is applied via collective_service_item_id.
+    let viaCollectiveId: string | null = null;
     if (parsed.data.practitioner_id && parsed.data.appointment_service_id) {
       const adminForCollective = getSupabaseAdminClient();
       if (await isCollectiveId(adminForCollective, parsed.data.venue_id)) {
-        const target = await resolveCombinedBookingTarget(adminForCollective, {
-          collectiveId: parsed.data.venue_id,
-          offeringId: parsed.data.appointment_service_id,
-          calendarId: parsed.data.practitioner_id,
-        });
-        if (!target) {
+        const resolved = await resolveCollectiveBookingTarget(
+          adminForCollective,
+          {
+            collectiveId: parsed.data.venue_id,
+            offeringId: parsed.data.appointment_service_id,
+            calendarId: parsed.data.practitioner_id,
+          },
+          'public',
+        );
+        if (!resolved.ok) {
           return NextResponse.json(
-            { error: 'This booking option is no longer available.' },
+            { error: resolved.error, ...(resolved.code ? { code: resolved.code } : {}) },
             { status: 409 },
           );
         }
+        const target = resolved.target;
         // §7.7 attribution: record which collective routed this booking BEFORE the
         // venue id is rewritten to the owning venue (the synthetic venue id IS the
         // collective id). Without this, combined-page bookings carried no
         // collective_id/collective_service_item_id at all.
         parsed.data.collective_id = parsed.data.venue_id;
+        viaCollectiveId = parsed.data.venue_id;
         parsed.data.collective_service_item_id = parsed.data.appointment_service_id;
         parsed.data.venue_id = target.venueId;
         parsed.data.appointment_service_id = target.sourceServiceId;
@@ -294,8 +308,11 @@ export async function POST(request: NextRequest) {
     // request must not answer under two auth models (P0-12).
     const authClient = await createRouteHandlerClient(request);
     const loginDenied = await nextResponseIfVenueRequiresAccountLoginForBooking({
-      requireAccountLogin: Boolean(
-        (venue as { require_account_login_for_bookings?: boolean }).require_account_login_for_bookings,
+      // D32: through a shared-services collective page, the host's setting decides.
+      requireAccountLogin: await bookingRequiresSignIn(
+        supabase,
+        viaCollectiveId,
+        Boolean((venue as { require_account_login_for_bookings?: boolean }).require_account_login_for_bookings),
       ),
       authSupabase: authClient,
       bookingEmail: email,
@@ -809,10 +826,10 @@ async function handleNonTableBooking(
     waitlist_offer_id,
     addons: requestedAddons,
   } = data;
-  // Resolved server-side from the approved provider row when this is a combined-
-  // page booking (never trusted from the client). Affects slot length, deposit
-  // and attribution. Null for ordinary bookings. Set in the unified branch.
-  let collectiveOverride: Awaited<ReturnType<typeof resolveCollectiveServiceOverride>> = null;
+  // Resolved server-side from the provider row when this is a combined-page booking
+  // (never trusted from the client). Attribution only: the booking is sized and
+  // charged at the calendar's own terms. Null for ordinary bookings.
+  let collectiveAttribution: Awaited<ReturnType<typeof resolveCollectiveServiceAttribution>> = null;
   // Validated + canonical-ordered addons (resolved against the chosen service).
   let chosenAddonSnapshots: ReturnType<typeof buildAddonSnapshots> = [];
   let chosenAddonTotals = { total_price_pence: 0, total_duration_minutes: 0 };
@@ -1068,6 +1085,24 @@ async function handleNonTableBooking(
     if (!practitioner_id || !appointment_service_id) {
       return NextResponse.json({ error: 'practitioner_id and appointment_service_id are required' }, { status: 400 });
     }
+    // "Staff bookings only" (plan §6.6): staff sources may book it, a guest source may not.
+    if (!isStaffBookingSource(source)) {
+      const staffOnly = await loadStaffOnlyServiceIds(supabase, [appointment_service_id]);
+      if (staffOnly.has(appointment_service_id)) {
+        return NextResponse.json(
+          apiError('This service is not bookable online. Please contact the venue to book it.', 'SERVICE_NOT_BOOKABLE_ONLINE'),
+          { status: 409 },
+        );
+      }
+    }
+
+    // D2: a venue live in a collective takes new bookings only for the collective's services.
+    const parked = await parkedServiceRefusal(supabase as unknown as RpcClient, [
+      { venueId: venue_id, serviceItemId: appointment_service_id },
+    ]);
+    if (parked) {
+      return NextResponse.json(parked.body, { status: parked.status });
+    }
     const serviceWindow = await loadServiceEntityBookingWindow(
       supabase,
       venue_id,
@@ -1084,30 +1119,17 @@ async function handleNonTableBooking(
     }
     const input = await fetchAppointmentInput({ supabase, venueId: venue_id, date: booking_date, practitionerId: practitioner_id, serviceId: appointment_service_id });
 
-    // Combined booking page (plan §6.3): resolve the server-side price/duration
-    // override from the approved provider row and inject the effective duration
-    // so the slot check reserves the right length. No-op for ordinary bookings.
-    // Applied BEFORE the variant and add-ons, as validate-appointment-slot and
-    // create-multi-service do: the override stands in for the source service's
-    // base terms, and whatever the customer chose on top of it still stacks.
-    // Applying it after the variant used to reset a 90-minute variant to the
-    // 30-minute base, so the booking was reserved and charged at base terms.
-    collectiveOverride = await resolveCollectiveServiceOverride(supabase, {
+    // Combined booking page: which offering produced this booking. The engine input
+    // already carries this calendar's own price and length, and nothing here replaces
+    // them. Substituting the source service's base terms charged the base price and
+    // reserved the base length on a calendar with its own (CB-02).
+    collectiveAttribution = await resolveCollectiveServiceAttribution(supabase, {
       collectiveId: collective_id,
       collectiveServiceItemId: collective_service_item_id,
       venueId: venue_id,
       sourceServiceId: appointment_service_id,
       practitionerId: practitioner_id,
     });
-    if (collectiveOverride?.durationMinutes != null) {
-      const oidx = input.services.findIndex((s) => s.id === appointment_service_id);
-      if (oidx >= 0) {
-        input.services[oidx] = {
-          ...input.services[oidx]!,
-          duration_minutes: collectiveOverride.durationMinutes,
-        };
-      }
-    }
 
     let chosenVariant = null as Awaited<ReturnType<typeof loadActiveVariantForService>>;
     if (service_variant_id) {
@@ -1233,14 +1255,7 @@ async function handleNonTableBooking(
     const mergedSvc = baseSvc ? mergeAppointmentServiceWithPractitionerLink(baseSvc, ps) : undefined;
     const svc = mergedSvc ? resolveBookableServiceWithVariant(mergedSvc, chosenVariant) : undefined;
     const practRow = input.practitioners.find((p) => p.id === practitioner_id);
-    // Combined page (plan §6.3 / D7): the customer is charged/deposited against the
-    // effective (overridden) price shown on the combined page, not the venue's own.
-    // The override is the offering's BASE price; a chosen variant carries its own
-    // price and replaces it, exactly as it does on a venue's own page.
-    const effectivePricePence =
-      collectiveOverride?.pricePence != null && !chosenVariant
-        ? collectiveOverride.pricePence
-        : svc?.price_pence ?? null;
+    const effectivePricePence = svc?.price_pence ?? null;
     appointmentEmailExtras = {
       email_variant: 'appointment',
       booking_model: 'unified_scheduling',
@@ -1278,16 +1293,11 @@ async function handleNonTableBooking(
       estimatedEndTime = endFields.estimated_end_time;
       appointmentBookingEndTime = endFields.booking_end_time;
 
-      // Model B: online charge from service payment mode (none / deposit / full payment).
-      // The combined-page override replaces the price the deposit is computed from;
-      // the deposit rules (mode / percentage) stay the venue's own. For full_payment
-      // the addon prices roll in; deposit stays on base+variant.
-      const svcForCharge =
-        collectiveOverride?.pricePence != null && !chosenVariant
-          ? { ...svc, price_pence: collectiveOverride.pricePence }
-          : svc;
+      // Model B: online charge from service payment mode (none / deposit / full payment),
+      // at this calendar's own price, on a combined page too. For full_payment the
+      // addon prices roll in; deposit stays on base+variant.
       const online = resolveAppointmentServiceOnlineChargeWithAddons({
-        svc: svcForCharge,
+        svc,
         addons_total_price_pence: chosenAddonTotals.total_price_pence,
       });
       if (online != null && online.amountPence > 0) {
@@ -1850,10 +1860,10 @@ async function handleNonTableBooking(
       .maybeSingle();
     if (membership) {
       bookingInsert.collective_id = collective_id;
-      // Record the offering that produced this booking when the override resolved
+      // Record the offering that produced this booking when it resolved
       // (i.e. it is a genuine, bookable combined-page offering).
-      if (collectiveOverride) {
-        bookingInsert.collective_service_item_id = collectiveOverride.collectiveServiceItemId;
+      if (collectiveAttribution) {
+        bookingInsert.collective_service_item_id = collectiveAttribution.collectiveServiceItemId;
       }
     }
   }
@@ -1895,6 +1905,11 @@ async function handleNonTableBooking(
     .single();
 
   if (bookErr) {
+    // The parked-service trigger (RN007) and the collective locks answer as coded 409s.
+    const collectiveRefusal = collectiveDbError(bookErr);
+    if (collectiveRefusal) {
+      return NextResponse.json(collectiveRefusal.body, { status: collectiveRefusal.status });
+    }
     // C1: the enforce_cde_capacity DB trigger RAISES (SQLSTATE 23P01,
     // message contains CDE_CAPACITY) when an event/class/resource slot just
     // filled or overlapped between the availability read and this insert.
@@ -2139,6 +2154,26 @@ async function handleNonTableBooking(
       bookingId: booking.id,
       purpose: 'manage',
     });
+
+    // N32: a guest booked a member's calendar on the collective page, so the venue running the
+    // page is told a booking happened. Never the client's name or contact details (D34), and never
+    // for the host's own calendars. Staff bookings are not page bookings.
+    if (collective_id && !isStaffBookingSource(source)) {
+      const noticeVenueId = venue_id;
+      const noticeCalendarId = practitioner_id ?? null;
+      const noticeServiceName =
+        (appointmentEmailExtras.appointment_service_name as string | null | undefined) ?? null;
+      const noticeDate = booking_date;
+      after(async () => {
+        await notifyPageBooking(supabase, {
+          collectiveId: collective_id,
+          owningVenueId: noticeVenueId,
+          serviceName: noticeServiceName,
+          calendarId: noticeCalendarId,
+          date: noticeDate,
+        });
+      });
+    }
 
     if (guest.email || guest.phone) {
       after(async () => {

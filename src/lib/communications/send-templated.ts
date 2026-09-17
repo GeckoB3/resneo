@@ -128,6 +128,17 @@ export async function attachAccountEntryLink(
   return link ? { ...booking, account_bookings_link: link } : booking;
 }
 
+/** Names the collective page a booking came through, so the confirmation can say so. */
+async function attachBookedThrough(admin: SupabaseClient, booking: BookingEmailData): Promise<BookingEmailData> {
+  if (!booking.id?.trim() || booking.booked_through) return booking;
+  const { data: row } = await admin.from('bookings').select('collective_id').eq('id', booking.id).maybeSingle();
+  const collectiveId = (row?.collective_id as string | null | undefined) ?? null;
+  if (!collectiveId) return booking;
+  const { data: collective } = await admin.from('venue_collectives').select('name').eq('id', collectiveId).maybeSingle();
+  const name = ((collective?.name as string | null | undefined) ?? '').trim();
+  return name ? { ...booking, booked_through: name } : booking;
+}
+
 async function enrichBookingForConfirmation(booking: BookingEmailData): Promise<BookingEmailData> {
   if (!booking.id?.trim()) return booking;
   const admin = getSupabaseAdminClient();
@@ -135,7 +146,8 @@ async function enrichBookingForConfirmation(booking: BookingEmailData): Promise<
     const enriched = await enrichBookingEmailForComms(admin, booking.id, booking);
     const withHold = await attachCardHoldFee(admin, enriched);
     const withForms = await attachComplianceForms(admin, withHold);
-    return await attachAccountEntryLink(admin, withForms);
+    const withThrough = await attachBookedThrough(admin, withForms).catch(() => withForms);
+    return await attachAccountEntryLink(admin, withThrough);
   } catch (err) {
     console.error('[send-templated] enrichBookingForConfirmation failed', {
       bookingId: booking.id,
@@ -363,6 +375,7 @@ export async function sendBookingModificationNotification(
   booking: BookingEmailData,
   venue: VenueEmailData,
   venueId: string,
+  options: { changeSummary?: string | null } = {},
 ): Promise<{ email: SendResult; sms: SendResult }> {
   const [email, sms] = await Promise.all([
     sendPolicyMessage({
@@ -372,6 +385,7 @@ export async function sendBookingModificationNotification(
       messageKey: 'booking_modification',
       channel: 'email',
       mode: 'upsert',
+      changeSummary: options.changeSummary ?? null,
     }),
     sendPolicyMessage({
       venueId,
@@ -577,7 +591,7 @@ export async function sendPaymentReceiptEmail(params: {
     .select(
       'id, guest_id, guest_email, booking_date, booking_time, party_size, booking_model, ' +
         'group_booking_id, service_item_id, appointment_service_id, calendar_id, practitioner_id, ' +
-        'booking_total_price_pence, service_variant_id, addons_total_price_pence, deposit_status, deposit_amount_pence',
+        'booking_total_price_pence, service_price_snapshot_pence, service_variant_id, addons_total_price_pence, deposit_status, deposit_amount_pence',
     )
     .eq('id', bookingId)
     .maybeSingle();

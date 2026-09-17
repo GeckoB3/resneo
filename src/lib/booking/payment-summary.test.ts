@@ -203,7 +203,7 @@ describe('resolveBookingTotalPenceFromRow', () => {
     // collects another.
     const { admin } = makeAdmin((call) => {
       if (call.table === 'practitioner_services') return { data: { custom_price_pence: 1800 } };
-      if (call.table === 'appointment_services') return { data: { price_pence: 1500 } };
+      if (call.table === 'appointment_services') return { data: { price_pence: 1500, staff_may_customize_price: true } };
       throw new Error(`unexpected table ${call.table}`);
     });
     const total = await resolveBookingTotalPenceFromRow(admin, {
@@ -215,8 +215,25 @@ describe('resolveBookingTotalPenceFromRow', () => {
     expect(total).toBe(1800);
   });
 
+  it("ignores a calendar's stored price once the service's price flag is off (D56)", async () => {
+    const { admin, calls } = makeAdmin((call) => {
+      if (call.table === 'service_items') return { data: { price_pence: 5000, staff_may_customize_price: false } };
+      if (call.table === 'calendar_service_assignments') return { data: { custom_price_pence: 3000 } };
+      throw new Error(`unexpected table ${call.table}`);
+    });
+    const total = await resolveBookingTotalPenceFromRow(admin, {
+      booking_total_price_pence: null,
+      service_item_id: 'si-1',
+      calendar_id: 'cal-1',
+    });
+    expect(total).toBe(5000);
+    // The stored price is not even read while the flag is off.
+    expect(calls.map((c) => c.table)).toEqual(['service_items']);
+  });
+
   it('reads the override from calendar_service_assignments on the newer schema', async () => {
     const { admin, calls } = makeAdmin((call) => {
+      if (call.table === 'service_items') return { data: { price_pence: 3000, staff_may_customize_price: true } };
       if (call.table === 'calendar_service_assignments') {
         return { data: { custom_price_pence: 2200 } };
       }
@@ -228,8 +245,8 @@ describe('resolveBookingTotalPenceFromRow', () => {
       calendar_id: 'cal-1',
     });
     expect(total).toBe(2200);
-    // The service list price is not queried once the override answered.
-    expect(calls.map((c) => c.table)).toEqual(['calendar_service_assignments']);
+    // The service row is read first for its price flag, then the calendar's own price.
+    expect(calls.map((c) => c.table)).toEqual(['service_items', 'calendar_service_assignments']);
   });
 
   it('treats a null override as "no override" and falls through to the service', async () => {
@@ -252,6 +269,7 @@ describe('resolveBookingTotalPenceFromRow', () => {
     // NOT silently fall back to charging the base price.
     const { admin } = makeAdmin((call) => {
       if (call.table === 'practitioner_services') return { data: { custom_price_pence: 0 } };
+      if (call.table === 'appointment_services') return { data: { price_pence: 1500, staff_may_customize_price: true } };
       throw new Error(`unexpected table ${call.table}`);
     });
     const total = await resolveBookingTotalPenceFromRow(admin, {
@@ -429,6 +447,7 @@ describe('loadVisitPaymentPicture (§5.7 visit-scoped settlement)', () => {
       {
         group_booking_id: 'grp-1',
         booking_total_price_pence: 900,
+        service_price_snapshot_pence: 800,
         service_variant_id: 'sv1',
         service_name_snapshot: 'Colour',
         service_variant_name_snapshot: 'Full head',
@@ -447,6 +466,7 @@ describe('loadVisitPaymentPicture (§5.7 visit-scoped settlement)', () => {
       venue_id: 'v1',
       group_booking_id: 'grp-1',
       booking_total_price_pence: 900,
+      service_price_snapshot_pence: 800,
       service_variant_id: 'sv1',
       service_name_snapshot: 'Colour',
       service_variant_name_snapshot: 'Full head',
@@ -533,7 +553,7 @@ describe('loadVisitPaymentPicture (§5.7 visit-scoped settlement)', () => {
         return { data: [{ practitioner_id: 'p1', service_id: 'svc-1', custom_price_pence: 1800 }] };
       }
       if (call.table === 'appointment_services') {
-        return { data: [{ id: 'svc-1', price_pence: 1500 }] };
+        return { data: [{ id: 'svc-1', price_pence: 1500, staff_may_customize_price: true }] };
       }
       if (call.table === 'booking_payments') return { data: [] };
       throw new Error(`unexpected table ${call.table}`);
@@ -976,5 +996,67 @@ describe('recomputeBookingPaymentSummary (§5.6)', () => {
     // Per-row attribution: b1 holds its deposit + the anchored payment; b2 none.
     expect(byId('b1').amount_paid_pence).toBe(9000);
     expect(byId('b2').amount_paid_pence).toBe(0);
+  });
+});
+
+/**
+ * PRICE-04 (20270212120000): a booking keeps the price it was made at. The snapshot wins over the
+ * live catalogue in every resolver, so editing a service price never moves a past total, balance
+ * or revenue figure.
+ */
+describe('service_price_snapshot_pence', () => {
+  it('wins over the live price, and a stored total still wins over both', () => {
+    expect(
+      resolveBookingTotalPence({ service_price_snapshot_pence: 2500, service_variant_price_pence: 3000, addons_total_price_pence: 500 }),
+    ).toBe(3000);
+    expect(
+      resolveBookingTotalPence({ booking_total_price_pence: 9000, service_price_snapshot_pence: 2500, addons_total_price_pence: 500 }),
+    ).toBe(9000);
+    // A null snapshot is "not recorded", not free: the live price applies as before.
+    expect(resolveBookingTotalPence({ service_price_snapshot_pence: null, service_variant_price_pence: 3000 })).toBe(3000);
+  });
+
+  it('prices a row from its snapshot without reading the catalogue', async () => {
+    const { admin, calls } = makeAdmin(() => {
+      throw new Error('the catalogue should not be read');
+    });
+    const total = await resolveBookingTotalPenceFromRow(admin, {
+      service_price_snapshot_pence: 2500,
+      service_variant_id: 'sv1',
+      service_item_id: 'si1',
+      calendar_id: 'c1',
+      addons_total_price_pence: 1000,
+    });
+    expect(total).toBe(3500);
+    expect(calls).toEqual([]);
+  });
+
+  it('keeps a visit at the agreed prices after the catalogue has changed', async () => {
+    const { admin } = makeAdmin((call) => {
+      if (call.table === 'bookings') {
+        return {
+          data: [
+            { id: 'b1', venue_id: 'v1', group_booking_id: 'g1', service_price_snapshot_pence: 2500, service_variant_id: 'sv1', service_item_id: 'si1', addons_total_price_pence: 0, status: 'Booked' },
+            { id: 'b2', venue_id: 'v1', group_booking_id: 'g1', service_price_snapshot_pence: 1500, service_item_id: 'si2', calendar_id: 'c1', addons_total_price_pence: 0, status: 'Booked' },
+          ],
+        };
+      }
+      // Today's catalogue: both prices have since gone up.
+      if (call.table === 'service_variants') return { data: [{ id: 'sv1', price_pence: 4000 }] };
+      if (call.table === 'service_items') return { data: [{ id: 'si2', price_pence: 2200 }] };
+      if (call.table === 'calendar_service_assignments') return { data: [] };
+      if (call.table === 'booking_payments') return { data: [] };
+      throw new Error(`unexpected table ${call.table}`);
+    });
+    const anchor = visitAnchorFromBooking(
+      { group_booking_id: 'g1', service_price_snapshot_pence: 2500, service_variant_id: 'sv1', service_item_id: 'si1' },
+      { id: 'b1', venueId: 'v1' },
+    );
+    expect(anchor.service_price_snapshot_pence).toBe(2500);
+
+    const visit = await loadVisitPaymentPicture(admin, anchor);
+
+    expect(visit.totalPence).toBe(4000);
+    expect(visit.lines.map((l) => l.total_pence)).toEqual([2500, 1500]);
   });
 });

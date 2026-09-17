@@ -48,12 +48,16 @@ const bodySchema = z.object({
  * POST pre-check had.
  */
 /**
- * Requirements for offerings on a combined page. With a concrete calendar the
- * offering resolves to exactly one owning venue and source service. With "any
- * available" the calendar is not yet known, so every provider venue's
- * requirements are merged (worst state wins per type) and the forms are drawn
- * against the first venue that has any, which is also where the pre-booking
- * uploads go. `venue_id` in the answer is that venue, for the upload endpoint.
+ * Requirements for offerings on a combined page. With a concrete calendar the offering resolves to
+ * exactly one owning venue and source service, and that venue's own form and version are served,
+ * with `venue_id` naming it for the upload endpoint.
+ *
+ * With "any available" the calendar is not yet known. When every calendar that could take the
+ * booking belongs to ONE venue there is no ambiguity, so that venue's forms are served as before.
+ * When they span venues the requirements are still merged (worst state wins per type) but NO form is
+ * served and `venue_id` stays the collective: a form completed first would file at one venue while
+ * the booking landed at another, leaving the venue that needs the record without it (SEC-03, RT2-2).
+ * The booking flow resolves the calendar when the guest picks a time, so this is the fallback path.
  */
 async function resolveCollectiveRequirements(
   admin: ReturnType<typeof getSupabaseAdminClient>,
@@ -65,7 +69,7 @@ async function resolveCollectiveRequirements(
     bookingDate: string | null;
     bookingTime: string | null;
   },
-): Promise<BookingRequirementsResult & { venue_id: string }> {
+): Promise<BookingRequirementsResult & { venue_id: string; forms_deferred?: boolean }> {
   const { practitioners } = await loadCollectiveAppointmentCatalog(admin, params.collectiveId);
   const concrete =
     params.practitionerId && params.practitionerId !== ANY_AVAILABLE_PRACTITIONER_ID
@@ -87,11 +91,14 @@ async function resolveCollectiveRequirements(
 
   const email = (params.email ?? '').trim();
   const identityKnown = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-  let out: BookingRequirementsResult & { venue_id: string } = {
+  let out: BookingRequirementsResult & { venue_id: string; forms_deferred?: boolean } = {
     identity_known: identityKnown,
     requirements: [],
     venue_id: params.collectiveId,
   };
+  // A form may be completed only when the venue that will hold the record is certain: a chosen
+  // calendar, or one venue behind every calendar that could take it (SEC-03).
+  const serveForms = Boolean(concrete) || sourceIdsByVenue.size === 1;
   let formsVenue: string | null = null;
   for (const [venueId, sourceIds] of sourceIdsByVenue) {
     const result = await publicBookingRequirements(admin, {
@@ -103,7 +110,7 @@ async function resolveCollectiveRequirements(
     });
     if (result.requirements.length === 0) continue;
     if (!formsVenue) formsVenue = venueId;
-    const keepForms = venueId === formsVenue;
+    const keepForms = serveForms && venueId === formsVenue;
     for (const req of result.requirements) {
       const existing = out.requirements.find((r) => r.compliance_type_id === req.compliance_type_id);
       const candidate = keepForms ? req : { ...req, form: null };
@@ -121,7 +128,11 @@ async function resolveCollectiveRequirements(
       }
     }
   }
-  out = { ...out, venue_id: formsVenue ?? params.collectiveId };
+  out = {
+    ...out,
+    venue_id: serveForms ? formsVenue ?? params.collectiveId : params.collectiveId,
+    ...(serveForms ? {} : { forms_deferred: out.requirements.length > 0 }),
+  };
   return out;
 }
 

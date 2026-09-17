@@ -58,12 +58,13 @@ import {
   LinkedBookingDetailModal,
 } from '@/components/linked-accounts/LinkedCalendarView';
 import { linkedNewBookingButtonClass } from '@/components/linked-accounts/linked-accounts-ui';
-import type { LinkedVenueCalendar, LinkedBooking, LinkedResource } from '@/lib/linked-accounts/calendar';
+import type { LinkedVenueCalendar, LinkedBooking, LinkedPractitioner, LinkedResource } from '@/lib/linked-accounts/calendar';
 import {
   linkedBookingToGridBooking,
   linkedColumnKey,
   linkedColumnUsesNativeGrid,
   linkedGrantActForOwnerVenue,
+  linkedPractitionerOpenRanges,
   linkedVenueScheduleBlocksForColumn,
   resolveLinkedGridPractitionerIdForPatch,
 } from '@/lib/linked-accounts/calendar';
@@ -111,6 +112,7 @@ import { getStaffBookingSurfaceTabs } from '@/lib/booking/staff-booking-modal-op
 import type { StaffRebookBootstrapPayloadV1 } from '@/lib/booking/staff-rebook-bootstrap';
 import { warmStaffBookingSurface } from '@/lib/booking/staff-surface-warm';
 import type { StaffCollectiveSummary } from '@/lib/linked-accounts/collective-staff-scope';
+import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 import {
   RESOURCE_BOOKING_CAPACITY_STATUSES,
   type ResourceBooking as EngineResourceBooking,
@@ -285,7 +287,7 @@ function formatDateNice(isoDate: string): string {
 }
 
 /** What the cross-account move dialog needs to say and to do. */
-interface CrossVenueMoveDialog {
+export interface CrossVenueMoveDialog {
   booking: Booking;
   sourceCalendarName: string;
   /** Null when the dragged booking is on this venue. */
@@ -297,6 +299,88 @@ interface CrossVenueMoveDialog {
   targetLinkedColumn: LinkedColumn | null;
   dateStr: string;
   time: string;
+  /** The two venues, so a move inside a live collective is answered by D46. */
+  sourceVenueId: string;
+  targetVenueId: string;
+}
+
+/** The confirmation for a move to another venue of the collective (D46 revised, option 2). */
+export function CollectiveVenueMoveDialog({
+  move,
+  onClose,
+  onMoved,
+}: {
+  move: CrossVenueMoveDialog;
+  onClose: () => void;
+  onMoved: (message: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const venue = move.targetVenueName ?? 'your venue';
+  const calendarId = move.targetLinkedColumn?.practitionerId ?? move.targetColumnKey;
+  const send = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/venue/bookings/${move.booking.id}/move-venue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ calendar_id: calendarId, booking_date: move.dateStr, booking_time: move.time }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { error?: string; guest_notified?: boolean };
+      if (!res.ok) {
+        setError(json.error ?? 'The booking could not be moved. Please try again.');
+        return;
+      }
+      const params = { calendar: move.targetCalendarName, venue };
+      onMoved(
+        json.guest_notified === false
+          ? collectiveCopy('move.otherVenue.doneNotTold', params)
+          : collectiveCopy('move.otherVenue.done', params),
+      );
+    } catch {
+      setError('The booking could not be moved. Please check your connection and try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !busy) onClose();
+      }}
+      title={collectiveCopy('move.otherVenue.title', { venue })}
+      size="sm"
+      contentClassName="max-w-md"
+      footer={
+        <div className="flex w-full flex-wrap items-center justify-end gap-2">
+          <Button type="button" variant="secondary" size="sm" disabled={busy} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="button" variant="primary" size="sm" disabled={busy} onClick={() => void send()}>
+            {busy ? collectiveCopy('move.otherVenue.moving') : collectiveCopy('move.otherVenue.confirm', { venue })}
+          </Button>
+        </div>
+      }
+    >
+      <div className="space-y-3">
+        <p className="text-sm text-slate-700">
+          {collectiveCopy('move.otherVenue.body', {
+            calendar: move.targetCalendarName,
+            venue,
+            time: `${move.time.slice(0, 5)} on ${formatDateNice(move.dateStr)}`,
+            ownVenue: move.sourceVenueName ?? 'your venue',
+          })}
+        </p>
+        {error ? (
+          <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+            {error}
+          </p>
+        ) : null}
+      </div>
+    </Dialog>
+  );
 }
 
 interface CrossVenueRebook {
@@ -318,8 +402,21 @@ interface LinkedColumn {
   practitionerName: string;
   practitionerActive: boolean;
   workingHours?: WorkingHours;
+  /** The owner's schedule and hours context; absent from an older feed. */
+  schedule?: LinkedPractitioner['schedule'];
+  hours?: LinkedVenueCalendar['hours'];
   visibility: LinkedVenueCalendar['visibility'];
   action: LinkedVenueCalendar['action'];
+}
+
+/** A linked column's open minutes on `dateYmd`, as the owner's own diary resolves them (SB-39). */
+function linkedColumnOpenRanges(col: LinkedColumn, dateYmd: string): Array<{ start: number; end: number }> | null {
+  return linkedPractitionerOpenRanges(col.practitionerId, col.schedule, col.hours, dateYmd);
+}
+
+function linkedColumnHoursLine(col: LinkedColumn, dateYmd: string): string {
+  const open = linkedColumnOpenRanges(col, dateYmd);
+  return open ? formatResolvedHoursLineForDate(open, null) : formatWorkingHoursLineForDate(col.workingHours, dateYmd, col.venueTimezone);
 }
 
 type DayGridColumn =
@@ -4615,6 +4712,8 @@ export function PractitionerCalendarView({
           practitionerName: p.name,
           practitionerActive: p.isActive,
           workingHours: p.workingHours,
+          schedule: p.schedule,
+          hours: v.hours,
           visibility: v.visibility,
           action: v.action,
         });
@@ -4630,11 +4729,13 @@ export function PractitionerCalendarView({
         ? linkedColumns
         : linkedColumns.filter((c) => new Set(visibleLinkedColumnIds).has(c.key));
     if (!workingHoursFilterActive) return chosen;
-    // A linked column carries its owner's weekly template only (no rota or days
-    // off), read in the owner venue's timezone as its header line is.
-    return chosen.filter((c) =>
-      calendarWorksOnDate({ working_hours: c.workingHours ?? null }, date, c.venueTimezone),
-    );
+    // Resolved as the owner resolves its own columns; the weekly template only for an older feed.
+    return chosen.filter((c) => {
+      const open = linkedColumnOpenRanges(c, date);
+      return open
+        ? open.length > 0
+        : calendarWorksOnDate({ working_hours: c.workingHours ?? null }, date, c.venueTimezone);
+    });
   }, [linkedColumns, visibleLinkedColumnIds, workingHoursFilterActive, date]);
 
   /** Read-only linked columns (time_only or view-only full_details). */
@@ -6205,6 +6306,8 @@ export function PractitionerCalendarView({
         targetVenueName: targetLinkedColumn?.venueName ?? null,
         targetLinkedColumn,
         dateStr,
+        sourceVenueId: draggedOwnerVenueId,
+        targetVenueId: targetOwnerVenueId,
         // The booking form offers whole slots, so the dropped minute rounds to five.
         time: minutesToTime(Math.round(targetStartMins / 5) * 5),
       });
@@ -7577,11 +7680,7 @@ export function PractitionerCalendarView({
                   </tr>
                 ))}
                 {visibleLinkedColumns.map((col) => {
-                  const linkedHoursLine = formatWorkingHoursLineForDate(
-                    col.workingHours,
-                    date,
-                    col.venueTimezone,
-                  );
+                  const linkedHoursLine = linkedColumnHoursLine(col, date);
                   return (
                   <tr key={col.key} className="border-b border-slate-100 transition-colors hover:bg-slate-50/70">
                     <td className="sticky left-0 bg-white/95 px-3 py-2 shadow-[4px_0_14px_rgba(15,23,42,0.035)]">
@@ -7832,11 +7931,7 @@ export function PractitionerCalendarView({
                       );
                     }
                     const linkedCol = col.column;
-                    const linkedHoursLine = formatWorkingHoursLineForDate(
-                      linkedCol.workingHours,
-                      date,
-                      linkedCol.venueTimezone,
-                    );
+                    const linkedHoursLine = linkedColumnHoursLine(linkedCol, date);
                     return (
                       <div
                         key={`hdr-${linkedCol.key}`}
@@ -7894,11 +7989,7 @@ export function PractitionerCalendarView({
                     </div>
                   ) : null}
                   {readOnlyLinkedColumns.map((col) => {
-                    const linkedHoursLine = formatWorkingHoursLineForDate(
-                      col.workingHours,
-                      date,
-                      col.venueTimezone,
-                    );
+                    const linkedHoursLine = linkedColumnHoursLine(col, date);
                     return (
                     <div
                       key={`hdr-${col.key}`}
@@ -7969,6 +8060,7 @@ export function PractitionerCalendarView({
                       ? (buildLinkedColumnClosureBlocks({
                           columnId: pracId,
                           workingHours: linkedCol.workingHours,
+                          openRanges: linkedColumnOpenRanges(linkedCol, date),
                           dateYmd: date,
                           timeZone: linkedCol.venueTimezone || venueTimezone,
                           gridStartHour: startHour,
@@ -8955,6 +9047,7 @@ export function PractitionerCalendarView({
           currentStaffId={currentStaffId}
           date={activeDayDate}
           bookingModel={bookingModel}
+          enabledModels={enabledModels}
           onClose={() => {
             setHoursQuickEditOpen(false);
             // Hours may have changed: re-read venue hours and the calendar
@@ -9296,7 +9389,23 @@ export function PractitionerCalendarView({
         />
       ) : null}
 
-      {crossVenueMove ? (
+      {crossVenueMove &&
+      staffCollective &&
+      staffCollective.memberVenueIds.includes(crossVenueMove.sourceVenueId) &&
+      staffCollective.memberVenueIds.includes(crossVenueMove.targetVenueId) ? (
+        // D46 revised (2026-09-16): inside a collective a booking with nothing attached moves to the
+        // other venue in one step; the server refuses the rest with the reason.
+        <CollectiveVenueMoveDialog
+          move={crossVenueMove}
+          onClose={() => setCrossVenueMove(null)}
+          onMoved={(message) => {
+            setCrossVenueMove(null);
+            addToast(message, 'success');
+            void refetchBookingsList();
+            void loadLinkedData();
+          }}
+        />
+      ) : crossVenueMove ? (
         <Dialog
           open
           onOpenChange={(open) => {

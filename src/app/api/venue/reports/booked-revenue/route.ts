@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getVenueLocalDateAndMinutes } from '@/lib/venue/venue-local-clock';
+import { getSupabaseAdminClient } from '@/lib/supabase';
 import {
   BOOKED_REVENUE_PRESETS,
   buildBookedRevenueReport,
@@ -20,7 +21,8 @@ const MAX_RANGE_DAYS = 400;
  *
  * Admin only. Booked revenue per period and per calendar for this venue, plus
  * the calendars of any linked venue that has granted full calendar detail with
- * create/edit/cancel rights. See src/lib/reports/booked-revenue.ts.
+ * create/edit/cancel rights, and of every other member of this venue's live
+ * collective, each venue subtotalled. See src/lib/reports/booked-revenue.ts.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -76,7 +78,7 @@ export async function GET(request: NextRequest) {
       to,
       grain,
       today,
-    });
+    }, { serviceClient: getSupabaseAdminClient() });
     return NextResponse.json(report, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err) {
     console.error('GET /api/venue/reports/booked-revenue failed:', err);

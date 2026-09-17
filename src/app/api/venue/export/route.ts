@@ -1,7 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
+import { getSupabaseAdminClient } from '@/lib/supabase';
 import { bookingModelShortLabel, inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
+import { normaliseGuestNamePart } from '@/lib/guests/name';
+
+/** "First Last" from whichever parts are set, or empty: a file export gets no "Guest" placeholder. */
+function csvGuestName(guest: { first_name?: string | null; last_name?: string | null } | null | undefined): string {
+  return [normaliseGuestNamePart(guest?.first_name), normaliseGuestNamePart(guest?.last_name)]
+    .filter(Boolean)
+    .join(' ');
+}
 
 function escapeCsvCell(value: string | number | boolean | null | undefined): string {
   const str = value == null ? '' : String(value);
@@ -25,6 +34,12 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const type = searchParams.get('type');
+
+    // Both exports carry every client's email and phone, and the only screen that offers them
+    // (Settings, Reports) is admin-only (PB-19).
+    if ((type === 'bookings' || type === 'guests') && !requireAdmin(staff)) {
+      return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
+    }
 
     if (type === 'bookings') {
       const { data: bookings, error } = await staff.db
@@ -50,8 +65,10 @@ export async function GET(request: NextRequest) {
           service_item_id,
           practitioner_id,
           appointment_service_id,
+          collective_id,
           guests (
-            name,
+            first_name,
+            last_name,
             email,
             phone
           )
@@ -64,16 +81,44 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: 'Failed to fetch bookings' }, { status: 500 });
       }
 
+      /**
+       * The collective each booking was made through (REP-01, SB-30). `collective_id` has no
+       * foreign key to embed through, so names are read separately, with the service client:
+       * a venue that has left a collective can no longer read the collective row under RLS, and
+       * its own bookings must still say where they came from (REP-06). Only the ids on this
+       * venue's own bookings are looked up, and only the name is read.
+       */
+      const collectiveIds = [
+        ...new Set(
+          (bookings ?? [])
+            .map((b) => (b as { collective_id?: string | null }).collective_id)
+            .filter((id): id is string => typeof id === 'string' && id.length > 0),
+        ),
+      ];
+      const collectiveNames = new Map<string, string>();
+      if (collectiveIds.length > 0) {
+        const { data: collectiveRows, error: collectiveErr } = await getSupabaseAdminClient()
+          .from('venue_collectives')
+          .select('id, name')
+          .in('id', collectiveIds);
+        if (collectiveErr) console.error('Export bookings collective names failed:', collectiveErr.message);
+        for (const c of collectiveRows ?? []) {
+          collectiveNames.set(c.id as string, (c.name as string | null) ?? 'Collective');
+        }
+      }
+
       const headers = [
         'Booking ID',
         'Date',
         'Time',
+        'Type',
         'Party Size',
         'Status',
         'Deposit Status',
         'Deposit Amount (£)',
         'Stripe Payment Intent',
         'Source',
+        'Booked Through Collective',
         'Guest Name',
         'Guest Email',
         'Guest Phone',
@@ -112,7 +157,8 @@ export async function GET(request: NextRequest) {
           depositGbp,
           b.stripe_payment_intent_id ?? '',
           b.source ?? '',
-          (guest as { name?: string } | null)?.name ?? '',
+          row.collective_id ? collectiveNames.get(row.collective_id as string) ?? 'Collective' : '',
+          csvGuestName(guest as { first_name?: string | null; last_name?: string | null } | null),
           (guest as { email?: string } | null)?.email ?? '',
           (guest as { phone?: string } | null)?.phone ?? '',
           b.dietary_notes ?? '',
@@ -133,14 +179,12 @@ export async function GET(request: NextRequest) {
     }
 
     if (type === 'guests') {
-      if (!requireAdmin(staff)) {
-        return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
-      }
       const { data: guests, error } = await staff.db
         .from('guests')
         .select(`
           id,
-          name,
+          first_name,
+          last_name,
           email,
           phone,
           visit_count,
@@ -150,7 +194,8 @@ export async function GET(request: NextRequest) {
           tags
         `)
         .eq('venue_id', staff.venue_id)
-        .order('name');
+        .order('last_name', { ascending: true, nullsFirst: false })
+        .order('first_name', { ascending: true, nullsFirst: false });
 
       if (error) {
         console.error('Export guests error:', error);
@@ -186,7 +231,7 @@ export async function GET(request: NextRequest) {
           : '';
         return [
           g.id,
-          g.name ?? '',
+          csvGuestName(g),
           g.email ?? '',
           g.phone ?? '',
           tags,

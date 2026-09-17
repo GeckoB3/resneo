@@ -1,4 +1,21 @@
 import { fetchServiceCategoryRefs } from '@/lib/booking/service-categories-db';
+import { loadCollectiveServiceBlocks } from '@/lib/linked-accounts/replicas/service-blocks';
+import { loadHostCollectiveCalendars } from '@/lib/linked-accounts/replicas/host-calendars';
+import { collectiveDbError } from '@/lib/linked-accounts/replicas/db-errors';
+import { invalidateCollectiveCatalogMemo } from '@/lib/linked-accounts/collective-venue';
+import { noticeNames, notifyHostCalendarChange } from '@/lib/linked-accounts/replicas/collective-notices';
+import {
+  hostOwnedFieldsInSave,
+  loadMemberServiceContext,
+  MEMBER_EDITABLE_SERVICE_KEYS,
+  memberRelationsUnchanged,
+} from '@/lib/linked-accounts/replicas/member-save';
+import { clearMemberCalendarValues } from '@/lib/linked-accounts/replicas/member-values-clear';
+import {
+  loadMasterSaveContext,
+  captureMasterProjection,
+  recordMasterChangeAndApply,
+} from '@/lib/linked-accounts/replicas/master-save';
 import { NextRequest, NextResponse, after } from 'next/server';
 import { isMissingSyncColumnError, patchTouchesSyncedShape, syncCopiesOfService } from '@/lib/linked-accounts/service-sync';
 import { VENUE_CATALOG_CACHE_CONTROL } from '@/lib/realtime/dashboard-sync-constants';
@@ -42,6 +59,14 @@ import {
   validateProcessingTimeBlocks,
 } from '@/lib/appointments/processing-time';
 import { normalizeBookingStartForStorage } from '@/lib/appointments/booking-interval';
+import {
+  sameIdSet,
+  setServiceCalendarAssignments,
+  STALE_SERVICE_MESSAGE,
+} from '@/lib/venue/calendar-service-assignment-writes';
+import { apiError } from '@/lib/api/error-codes';
+import { applicableCalendarValues, type CalendarAssignmentRow } from '@/lib/booking/calendar-service-terms';
+import { clearCalendarValuesForFlagsTurnedOff } from '@/lib/venue/calendar-values-flag-off';
 
 const staffMaySchema = {
   staff_may_customize_name: z.boolean().optional(),
@@ -87,6 +112,14 @@ const locationFieldsSchema = {
   online_meeting_info: z.string().max(2000).nullable().optional(),
 };
 
+/**
+ * What the guest is asked to do before the appointment (G8a). A venue's own under a collective
+ * (D53), so a member edits it on a service from its host too (member-save.ts allowlist).
+ */
+const venueFieldsSchema = {
+  pre_appointment_instructions: z.string().max(2000).nullable().optional(),
+};
+
 const customWorkingHoursSchema = customWorkingHoursRequestSchema;
 const STAFF_SERVICE_FIELD_PERMISSIONS = {
   name: 'staff_may_customize_name',
@@ -109,6 +142,12 @@ const serviceSchema = z
     payment_requirement: paymentRequirementSchema.optional(),
     colour: z.string().max(20).optional(),
     is_active: z.boolean().optional(),
+    /**
+     * "Staff bookings only" (plan Appendix F; W4 honours it everywhere, W5 lets a venue set it).
+     * False means the team can book it from the diary but guests never see it, on this venue's
+     * page or on a collective's.
+     */
+    is_bookable_online: z.boolean().optional(),
     sort_order: z.number().int().optional(),
     /** Category heading on the booking pages; null clears it. Must belong to the venue. */
     category_id: z.string().uuid().nullable().optional(),
@@ -127,6 +166,7 @@ const serviceSchema = z
     custom_working_hours: customWorkingHoursSchema,
     processing_time_blocks: processingTimeBlocksSchema.optional(),
     ...locationFieldsSchema,
+    ...venueFieldsSchema,
     ...staffMaySchema,
   })
   .superRefine((data, ctx) => {
@@ -194,6 +234,12 @@ const servicePatchSchema = z
     payment_requirement: paymentRequirementSchema.optional(),
     colour: z.string().max(20).optional(),
     is_active: z.boolean().optional(),
+    /**
+     * "Staff bookings only" (plan Appendix F; W4 honours it everywhere, W5 lets a venue set it).
+     * False means the team can book it from the diary but guests never see it, on this venue's
+     * page or on a collective's.
+     */
+    is_bookable_online: z.boolean().optional(),
     sort_order: z.number().int().optional(),
     /** Category heading on the booking pages; null clears it. Must belong to the venue. */
     category_id: z.string().uuid().nullable().optional(),
@@ -212,6 +258,7 @@ const servicePatchSchema = z
     custom_working_hours: customWorkingHoursSchema,
     processing_time_blocks: processingTimeBlocksSchema.optional(),
     ...locationFieldsSchema,
+    ...venueFieldsSchema,
     ...staffMaySchema,
   })
   .superRefine((data, ctx) => {
@@ -405,6 +452,7 @@ function mapServiceItemRowForDashboard(row: Record<string, unknown>): Record<str
     booking_minute_marks: (row.booking_minute_marks as number[] | null | undefined) ?? null,
     booking_start_times: (row.booking_start_times as string[] | null | undefined) ?? null,
     custom_availability_enabled: (row.custom_availability_enabled as boolean | undefined) ?? false,
+    is_bookable_online: (row.is_bookable_online as boolean | undefined) ?? true,
     staff_may_customize_name: (row.staff_may_customize_name as boolean | undefined) ?? false,
     staff_may_customize_description: (row.staff_may_customize_description as boolean | undefined) ?? false,
     staff_may_customize_duration: (row.staff_may_customize_duration as boolean | undefined) ?? false,
@@ -663,25 +711,19 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: 'Failed to fetch service links' }, { status: 500 });
       }
 
+      // Each calendar's own values as they apply: name, description, buffer, deposit and colour
+      // only while the service's staff permission flag is on, price and length as stored (W8,
+      // TERMS-14). The web card and the mobile app merge these over the service unchanged.
+      const serviceRowById = new Map(
+        ((servicesRes.data ?? []) as Record<string, unknown>[]).map((s) => [s.id as string, s]),
+      );
       const practitioner_services = (linksRes.data ?? []).map((r) => {
-        const row = r as {
-          id: string;
-          calendar_id: string;
-          service_item_id: string;
-          custom_duration_minutes: number | null;
-          custom_price_pence: number | null;
-        };
+        const row = r as CalendarAssignmentRow & { id: string; calendar_id: string; service_item_id: string };
         return {
           id: row.id,
           practitioner_id: row.calendar_id,
           service_id: row.service_item_id,
-          custom_duration_minutes: row.custom_duration_minutes,
-          custom_price_pence: row.custom_price_pence,
-          custom_name: null,
-          custom_description: null,
-          custom_buffer_minutes: null,
-          custom_deposit_pence: null,
-          custom_colour: null,
+          ...applicableCalendarValues(row, serviceRowById.get(row.service_item_id)),
         };
       });
 
@@ -704,17 +746,38 @@ export async function GET(request: NextRequest) {
           includeInactive: true,
         }),
       ]);
+      // What each service is to this venue while it is in a collective (W5). The map is empty at
+      // every venue that is not in a replicas-model collective, which is all of them today.
+      const collectiveBlocks = await loadCollectiveServiceBlocks(admin, catalogVenueId);
+      // Every calendar in the collective, host admins only: the host chooses which of them offer
+      // a service, at its own venue and at members. Members are never merged into
+      // practitioner_services, which the app sends back as the whole set (contract 5).
+      const collectiveCalendars =
+        staff.role === 'admin' ? await loadHostCollectiveCalendars(admin, catalogVenueId) : null;
       const servicesWithVariants = services.map((s) => ({
         ...s,
         variants: variantMap.get(s.id as string) ?? [],
         addon_groups: addonGroupMap.get(s.id as string) ?? [],
+        collective: collectiveBlocks.get(s.id as string) ?? null,
       }));
+
+      // Headings the member's collective manages (W6): the Categories tab locks them.
+      const { data: managedHeadings } =
+        categories.length > 0
+          ? await admin
+              .from('service_categories')
+              .select('id')
+              .eq('venue_id', catalogVenueId)
+              .not('managed_by_collective_id', 'is', null)
+          : { data: [] as { id: string }[] };
+      const managedIds = new Set((managedHeadings ?? []).map((h) => h.id as string));
 
       return NextResponse.json(
         {
           services: servicesWithVariants,
           practitioner_services,
-          categories,
+          categories: categories.map((c) => (managedIds.has(c.id) ? { ...c, managed: true } : c)),
+          ...(collectiveCalendars ? { collective_calendars: collectiveCalendars } : {}),
         },
         { headers: { 'Cache-Control': VENUE_CATALOG_CACHE_CONTROL } },
       );
@@ -762,10 +825,12 @@ export async function GET(request: NextRequest) {
         includeInactive: true,
       }),
     ]);
+    const legacyCollectiveBlocks = await loadCollectiveServiceBlocks(admin, staff.venue_id);
     const servicesWithVariants = services.map((s) => ({
       ...s,
       variants: variantMap.get(s.id as string) ?? [],
       addon_groups: addonGroupMap.get(s.id as string) ?? [],
+      collective: legacyCollectiveBlocks.get(s.id as string) ?? null,
     }));
 
     return NextResponse.json(
@@ -932,6 +997,8 @@ export async function POST(request: NextRequest) {
         price_type: 'fixed' as const,
         colour: parsed.data.colour ?? '#3B82F6',
         is_active: parsed.data.is_active ?? true,
+        // A new service takes guest bookings unless the venue says otherwise (Appendix F).
+        is_bookable_online: parsed.data.is_bookable_online ?? true,
         sort_order:
           parsed.data.sort_order ??
           (await nextServiceSortOrder(admin, 'service_items', staff.venue_id)),
@@ -1047,7 +1114,14 @@ export async function POST(request: NextRequest) {
       payment_requirement: parsed.data.payment_requirement,
       deposit_pence: parsed.data.deposit_pence,
     });
-    const { payment_requirement: _pr0, deposit_pence: _dp0, ...restCreate } = parsed.data;
+    // is_bookable_online is dropped with them: the legacy table has no such column, and every
+    // venue is on unified scheduling, so nothing reaches this branch in practice.
+    const {
+      payment_requirement: _pr0,
+      deposit_pence: _dp0,
+      is_bookable_online: _sbo0,
+      ...restCreate
+    } = parsed.data;
     const insertRow = {
       venue_id: staff.venue_id,
       created_by_staff_id: staff.id,
@@ -1147,6 +1221,16 @@ export async function POST(request: NextRequest) {
   }
 }
 
+/**
+ * The host's calendar choices sent with a service save: which calendars offer it, at its own venue
+ * and at members (plan Appendix E contract 4). Every entry goes through the engine, which is the
+ * only writer of another venue's assignments.
+ */
+const collectiveCalendarsPatchSchema = z.object({
+  add: z.array(z.object({ calendar_id: z.string().uuid(), venue_id: z.string().uuid() })).optional(),
+  remove: z.array(z.object({ calendar_id: z.string().uuid(), venue_id: z.string().uuid() })).optional(),
+});
+
 /** PATCH /api/venue/appointment-services - admin: full edit; staff: assigned calendars only. */
 export async function PATCH(request: NextRequest) {
   try {
@@ -1160,9 +1244,16 @@ export async function PATCH(request: NextRequest) {
       practitioner_ids: rawPractitionerIds,
       variants: variantsRaw,
       addon_group_links: addonLinksRaw,
+      expected_updated_at: rawExpectedUpdatedAt,
+      expected_calendar_ids: rawExpectedCalendarIds,
+      collective_calendars: rawCollectiveCalendars,
       ...rest
     } = body;
     const practitioner_ids = normalizePractitionerIdsInput(rawPractitionerIds);
+    // Both optional: a client that sends them gets 412 STALE_RESOURCE instead of overwriting a
+    // change made after it loaded the service. Older app builds send neither.
+    const expectedUpdatedAt = typeof rawExpectedUpdatedAt === 'string' ? rawExpectedUpdatedAt : null;
+    const expectedCalendarIds = normalizePractitionerIdsInput(rawExpectedCalendarIds) ?? null;
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
     const acknowledgeAffectedBookings =
       request.nextUrl.searchParams.get('acknowledge_affected_bookings') === 'true';
@@ -1170,6 +1261,18 @@ export async function PATCH(request: NextRequest) {
     const parsed = servicePatchSchema.safeParse(rest);
     if (!parsed.success) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
+    }
+
+    let collectiveCalendarsPatch: z.infer<typeof collectiveCalendarsPatchSchema> | null = null;
+    if (rawCollectiveCalendars !== undefined) {
+      const calendarsParsed = collectiveCalendarsPatchSchema.safeParse(rawCollectiveCalendars);
+      if (!calendarsParsed.success) {
+        return NextResponse.json(
+          { error: 'Each calendar needs a calendar and a venue.', details: calendarsParsed.error.flatten() },
+          { status: 400 },
+        );
+      }
+      collectiveCalendarsPatch = calendarsParsed.data;
     }
 
     const variantsProvided = variantsRaw !== undefined;
@@ -1228,6 +1331,12 @@ export async function PATCH(request: NextRequest) {
           { status: 403 },
         );
       }
+      if (collectiveCalendarsPatch) {
+        return NextResponse.json(
+          { error: 'Only venue admins can choose which calendars offer a shared service.' },
+          { status: 403 },
+        );
+      }
     }
 
     const admin = getSupabaseAdminClient();
@@ -1262,6 +1371,75 @@ export async function PATCH(request: NextRequest) {
           );
         }
       }
+
+      if (
+        expectedUpdatedAt !== null &&
+        Date.parse(expectedUpdatedAt) !== Date.parse(String((serviceRow as { updated_at?: string }).updated_at))
+      ) {
+        return NextResponse.json(apiError(STALE_SERVICE_MESSAGE, 'STALE_RESOURCE'), { status: 412 });
+      }
+
+      /**
+       * What this service is to the collective (W5). There is a context only at the host of a live
+       * replicas-model collective, which is no venue today, and everything below is a no-op without
+       * one. `before` is what the collective copies as the save begins, so the 60 second undo has
+       * something exact to put back.
+       */
+      const masterContext = await loadMasterSaveContext(admin, id as string, staff.venue_id);
+      if (collectiveCalendarsPatch && !masterContext) {
+        return NextResponse.json(
+          apiError(
+            'This service is not on the collective page, so its calendars cannot be shared.',
+            'COLLECTIVE_REPLICA_NOT_READY',
+          ),
+          { status: 409 },
+        );
+      }
+      /**
+       * The other side of the same question: a member holding a copy of one of the host's services
+       * may change which of its calendars offer it, and its own joining details, and nothing else
+       * (contract 4, member half). The engine refuses the rest anyway; this says so in words.
+       */
+      // A venue is either the host of this service or a member holding a copy, never both.
+      let writeRelations = true;
+      const memberContext = masterContext
+        ? null
+        : await loadMemberServiceContext(admin, id as string, staff.venue_id);
+      if (memberContext) {
+        const refused = hostOwnedFieldsInSave(
+          { ...(parsed.data as Record<string, unknown>), ...(collectiveCalendarsPatch ? { collective_calendars: true } : {}) },
+          serviceRow as Record<string, unknown>,
+        );
+        // The app sends every option and add-on link back on each save (APP-01): unchanged, they
+        // are not written, since they are the host's; changed, the save is the host's to make.
+        const relations = await memberRelationsUnchanged(admin, id as string, {
+          variants: variantsProvided ? parsedVariants : undefined,
+          addonLinks: addonLinksProvided ? parsedAddonLinks : undefined,
+        });
+        if (refused.length > 0 || !relations.variants || !relations.addonLinks) {
+          return NextResponse.json(
+            apiError(
+              `${memberContext.hostVenueName} manages this service for ${memberContext.collectiveName}, so only ${memberContext.hostVenueName} can change it. You choose which of your calendars offer it.`,
+              'COLLECTIVE_MANAGED_SERVICE',
+            ),
+            { status: 409 },
+          );
+        }
+        writeRelations = false;
+      }
+
+      const collectiveBefore = await captureMasterProjection(admin, masterContext);
+      const collectiveNames = masterContext
+        ? { collective: masterContext.collectiveName, host: masterContext.hostVenueName }
+        : {};
+      const collectiveCalendarFailures: { venue_id: string; calendar_id: string; message: string }[] = [];
+      /** Calendar changes that went through, so the venues they belong to can be told once (N11). */
+      const collectiveCalendarWrites: {
+        venue_id: string;
+        calendar_id: string;
+        action: 'assign' | 'unassign';
+        kept: number;
+      }[] = [];
 
       const customCoherent = assertPatchCustomAvailabilityCoherent({
         patch: parsed.data,
@@ -1351,6 +1529,9 @@ export async function PATCH(request: NextRequest) {
       if (requestedManagedCalendarIds !== undefined) {
         const currentLinks = (existingLinks ?? []) as Array<Record<string, unknown>>;
         const currentCalendarIds = currentLinks.map((r) => r.calendar_id as string);
+        if (expectedCalendarIds !== null && !sameIdSet(currentCalendarIds, expectedCalendarIds)) {
+          return NextResponse.json(apiError(STALE_SERVICE_MESSAGE, 'STALE_RESOURCE'), { status: 412 });
+        }
         const currentManagedIds =
           staff.role === 'admin'
             ? currentCalendarIds
@@ -1373,32 +1554,7 @@ export async function PATCH(request: NextRequest) {
           }
         }
 
-        const preservedOutsideScope =
-          staff.role === 'admin'
-            ? []
-            : currentLinks.filter((r) => !managedScope?.ok || !managedScope.managedCalendarIds.includes(r.calendar_id as string));
-        const preserveByCalendar = new Map(currentLinks.map((r) => [r.calendar_id as string, r] as const));
-        const finalLinks = [
-          ...preservedOutsideScope,
-          ...requestedManagedCalendarIds.map((calendarId) => {
-            const prev = preserveByCalendar.get(calendarId);
-            return {
-              calendar_id: calendarId,
-              service_item_id: id,
-              custom_duration_minutes: (prev?.custom_duration_minutes as number | null | undefined) ?? null,
-              custom_price_pence: (prev?.custom_price_pence as number | null | undefined) ?? null,
-            };
-          }),
-        ];
-
-        await admin.from('calendar_service_assignments').delete().eq('service_item_id', id);
-        if (finalLinks.length > 0) {
-          const { error: linkErr } = await admin.from('calendar_service_assignments').insert(finalLinks);
-          if (linkErr) {
-            console.error('PATCH /api/venue/appointment-services calendar_service_assignments failed:', linkErr);
-            return NextResponse.json({ error: 'Failed to update service links' }, { status: 500 });
-          }
-        }
+        // The write itself runs after every validation below (PB-05), as an atomic diff.
       }
 
       if (parsed.data.payment_requirement !== undefined) {
@@ -1426,6 +1582,10 @@ export async function PATCH(request: NextRequest) {
         }
       }
 
+      if (Object.prototype.hasOwnProperty.call(updatePayload, 'pre_appointment_instructions')) {
+        const text = (updatePayload.pre_appointment_instructions as string | null | undefined)?.trim();
+        updatePayload.pre_appointment_instructions = text ? text : null;
+      }
       delete updatePayload.location_type;
       delete updatePayload.online_meeting_url;
       delete updatePayload.online_meeting_info;
@@ -1500,23 +1660,117 @@ export async function PATCH(request: NextRequest) {
         updatePayload.sync_state = 'customised';
       }
 
+      /**
+       * The host's calendar choices go through the engine, the only writer of another venue's
+       * assignments (§6.7). They run before the service write, so a removal that would leave
+       * bookings behind answers first and the save has not happened yet. A removal the host has
+       * not acknowledged writes nothing; earlier removals in the same list that had no bookings
+       * are written, which is what the host asked for either way, and the retry finds them gone.
+       */
+      if (masterContext && collectiveCalendarsPatch?.add?.length) {
+        // A bookable room is a resource, not a calendar that offers a service.
+        const { data: roomRows } = await admin
+          .from('unified_calendars')
+          .select('id')
+          .in('id', collectiveCalendarsPatch.add.map((e) => e.calendar_id))
+          .eq('calendar_type', 'resource');
+        if ((roomRows ?? []).length > 0) {
+          return NextResponse.json({ error: 'Rooms and other resources cannot offer a service.' }, { status: 400 });
+        }
+      }
+      if (masterContext && collectiveCalendarsPatch) {
+        const calendarEntries = [
+          ...(collectiveCalendarsPatch.remove ?? []).map((e) => ({ ...e, action: 'unassign' as const })),
+          ...(collectiveCalendarsPatch.add ?? []).map((e) => ({ ...e, action: 'assign' as const })),
+        ];
+        for (const entry of calendarEntries) {
+          const { data: calData, error: calError } = await admin.rpc('collective_set_calendar_offering', {
+            p_collective_id: masterContext.collectiveId,
+            p_item_id: masterContext.itemId,
+            p_venue_id: entry.venue_id,
+            p_calendar_id: entry.calendar_id,
+            p_action: entry.action,
+            p_actor_venue_id: staff.venue_id,
+            // The venue acts, not a person: this route holds no user id to hand over.
+            p_actor_user_id: null,
+            p_acknowledge_affected: acknowledgeAffectedBookings,
+          });
+          if (calError) {
+            const coded = collectiveDbError(calError, collectiveNames);
+            if (!coded) {
+              console.error(
+                'PATCH /api/venue/appointment-services collective_set_calendar_offering failed:',
+                calError,
+              );
+            }
+            collectiveCalendarFailures.push({
+              venue_id: entry.venue_id,
+              calendar_id: entry.calendar_id,
+              message: coded?.body.error ?? 'Could not change that calendar.',
+            });
+            continue;
+          }
+          const calResult = (calData ?? {}) as {
+            written?: boolean;
+            affected_bookings?: { booking_date: string; booking_time: string; calendar_id: string }[];
+          };
+          if (calResult.written) {
+            collectiveCalendarWrites.push({
+              venue_id: entry.venue_id,
+              calendar_id: entry.calendar_id,
+              action: entry.action,
+              kept: calResult.affected_bookings?.length ?? 0,
+            });
+          }
+          if (
+            entry.action === 'unassign' &&
+            calResult.written === false &&
+            (calResult.affected_bookings?.length ?? 0) > 0
+          ) {
+            return NextResponse.json(
+              {
+                requires_confirmation: true,
+                affected_bookings: calResult.affected_bookings,
+                written: false,
+              },
+              { status: 409 },
+            );
+          }
+        }
+        invalidateCollectiveCatalogMemo(masterContext.collectiveId);
+      }
+
       let savedRow = serviceRow as Record<string, unknown>;
+      if (memberContext) {
+        // A member writes only its own fields. The rest of its copy is the host's, and the check
+        // above has already refused a save that would change any of it.
+        const own = new Set<string>(MEMBER_EDITABLE_SERVICE_KEYS);
+        updatePayload = Object.fromEntries(Object.entries(updatePayload).filter(([key]) => own.has(key)));
+      }
       if (Object.keys(updatePayload).length > 0) {
-        let saved = await admin
-          .from('service_items')
-          .update(updatePayload)
-          .eq('id', id)
-          .eq('venue_id', staff.venue_id)
-          .select()
-          .single();
+        const updateServiceRow = (values: Record<string, unknown>) => {
+          let q = admin.from('service_items').update(values).eq('id', id).eq('venue_id', staff.venue_id);
+          // The exact check, in the same statement as the write: the early check above compares
+          // at millisecond precision and cannot close the gap between reading and writing.
+          if (expectedUpdatedAt !== null) q = q.eq('updated_at', expectedUpdatedAt);
+          return q.select().maybeSingle();
+        };
+        let saved = await updateServiceRow(updatePayload);
         if (saved.error && 'sync_state' in updatePayload && isMissingSyncColumnError(saved.error)) {
           // Database without the sync columns: save the rest as before.
           const { sync_state: _omit, ...rest } = updatePayload;
-          saved = await admin.from('service_items').update(rest).eq('id', id).eq('venue_id', staff.venue_id).select().single();
+          saved = await updateServiceRow(rest);
         }
         const { data, error } = saved;
 
+        if (!error && !data) {
+          return NextResponse.json(apiError(STALE_SERVICE_MESSAGE, 'STALE_RESOURCE'), { status: 412 });
+        }
         if (error) {
+          // A member editing a field the collective owns is refused by the engine (RN001, RN006):
+          // that is an answer the page can show, not a fault.
+          const coded = collectiveDbError(error, collectiveNames);
+          if (coded) return NextResponse.json(coded.body, { status: coded.status });
           console.error('PATCH /api/venue/appointment-services (service_items) failed:', error);
           return NextResponse.json({ error: 'Failed to update service' }, { status: 500 });
         }
@@ -1525,8 +1779,32 @@ export async function PATCH(request: NextRequest) {
         return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
       }
 
+      if (requestedManagedCalendarIds !== undefined) {
+        const written = await setServiceCalendarAssignments(admin, {
+          venueId: staff.venue_id,
+          serviceItemId: id as string,
+          calendarIds: requestedManagedCalendarIds,
+          scopeCalendarIds:
+            staff.role === 'admin' ? null : managedScope?.ok ? managedScope.managedCalendarIds : [],
+          expectedCalendarIds,
+        });
+        if (!written.ok) {
+          if (written.reason === 'stale') {
+            return NextResponse.json(apiError(STALE_SERVICE_MESSAGE, 'STALE_RESOURCE'), { status: 412 });
+          }
+          if (written.reason === 'not_at_venue' || written.reason === 'outside_scope') {
+            return NextResponse.json(
+              { error: 'You can only change service links on calendars at your venue that you manage.' },
+              { status: 403 },
+            );
+          }
+          console.error('PATCH /api/venue/appointment-services calendar_service_assignments failed:', written.message);
+          return NextResponse.json({ error: 'Failed to update service links' }, { status: 500 });
+        }
+      }
+
       let savedVariants: Awaited<ReturnType<typeof replaceServiceVariants>> | null = null;
-      if (variantsProvided) {
+      if (variantsProvided && writeRelations) {
         savedVariants = await replaceServiceVariants({
           admin,
           venueId: staff.venue_id,
@@ -1541,7 +1819,7 @@ export async function PATCH(request: NextRequest) {
         }
       }
 
-      if (addonLinksProvided) {
+      if (addonLinksProvided && writeRelations) {
         const linkRes = await replaceServiceAddonGroupLinks({
           admin,
           venueId: staff.venue_id,
@@ -1553,12 +1831,73 @@ export async function PATCH(request: NextRequest) {
         }
       }
 
+      /**
+       * The save is written. Record what the collective copies, before and after, so the host can
+       * undo it for 60 seconds, then bring every member's copy up to date within the save's budget
+       * (§6.4). What the budget does not reach is `pending` and the cron has it within five minutes.
+       */
+      const collectiveSync = await recordMasterChangeAndApply(admin, {
+        context: masterContext,
+        serviceId: id as string,
+        before: collectiveBefore,
+        actorVenueId: staff.venue_id,
+        actorUserId: null,
+      });
+      if (collectiveSync && collectiveCalendarFailures.length > 0) {
+        collectiveSync.calendar_failures = collectiveCalendarFailures;
+      }
+
+      // N11, grouped per save: one notice per venue and per action, naming its own calendars. The
+      // host's own calendars are its own business, so nothing is sent for those.
+      if (masterContext && collectiveCalendarWrites.length > 0) {
+        const names = await noticeNames(admin, {
+          itemId: masterContext.itemId,
+          calendarIds: collectiveCalendarWrites.map((w) => w.calendar_id),
+        });
+        const grouped = new Map<string, typeof collectiveCalendarWrites>();
+        for (const write of collectiveCalendarWrites) {
+          if (write.venue_id === staff.venue_id) continue;
+          const key = `${write.venue_id}:${write.action}`;
+          grouped.set(key, [...(grouped.get(key) ?? []), write]);
+        }
+        for (const writes of grouped.values()) {
+          await notifyHostCalendarChange(admin, {
+            memberVenueId: writes[0].venue_id,
+            collectiveId: masterContext.collectiveId,
+            collectiveName: masterContext.collectiveName,
+            hostVenueName: masterContext.hostVenueName,
+            serviceName: names.serviceName,
+            calendarNames: writes.map((w) => names.calendarName(w.calendar_id)),
+            action: writes[0].action,
+            keptBookings: writes.reduce((total, w) => total + w.kept, 0),
+          });
+        }
+      }
+
       if (touchesShape) {
         // Members' copies of THIS service follow its shape. After the response: a partner
         // venue's problem must neither slow nor fail the owner's own save.
         const originId = id as string;
         after(() => syncCopiesOfService(admin, originId, 'PATCH /api/venue/appointment-services'));
       }
+
+      // An unticked staff permission box clears the price, deposit, length or buffer calendars stored
+      // under it (D6, D56), so ticking it again later cannot bring an old price back unnoticed.
+      const clearedCalendarValues = await clearCalendarValuesForFlagsTurnedOff(admin, {
+        serviceItemId: id as string,
+        before: serviceRow as Record<string, unknown>,
+        after: savedRow,
+      });
+      // The same, at every member holding a copy: their calendars stored values under the same
+      // permission, and they must not come back when the host ticks it again (D6, N15).
+      const clearedMemberValues = await clearMemberCalendarValues(admin, {
+        context: masterContext,
+        serviceName: String(savedRow.name ?? 'A service'),
+        before: serviceRow as Record<string, unknown>,
+        after: savedRow,
+        actorVenueId: staff.venue_id,
+        actorUserId: null,
+      });
 
       const [variantMap, addonGroupMap] = await Promise.all([
         loadVariantsForServices({
@@ -1581,6 +1920,9 @@ export async function PATCH(request: NextRequest) {
         ...mapServiceItemRowForDashboard(savedRow),
         variants: variantMap.get(id as string) ?? [],
         addon_groups: addonGroupMap.get(id as string) ?? [],
+        ...(clearedCalendarValues.length > 0 ? { cleared_calendar_values: clearedCalendarValues } : {}),
+        ...(collectiveSync ? { collective_sync: collectiveSync } : {}),
+        ...(clearedMemberValues.length > 0 ? { cleared_member_values: clearedMemberValues } : {}),
       });
     }
 
@@ -1630,6 +1972,9 @@ export async function PATCH(request: NextRequest) {
     let managedScope: Awaited<ReturnType<typeof requireManagedCalendarIds>> | null = null;
     let requestedPractitionerIds = practitioner_ids;
     let patchPayload: Record<string, unknown> = { ...parsed.data };
+    // The legacy table has no "staff bookings only" column (Appendix F is unified-only), and every
+    // venue is on unified scheduling, so this only guards a request that cannot happen.
+    delete patchPayload.is_bookable_online;
 
     if (staff.role !== 'admin') {
       managedScope = await requireManagedCalendarIds(admin, staff.venue_id, staff);
@@ -1759,6 +2104,7 @@ export async function PATCH(request: NextRequest) {
     delete patchPayload.location_type;
     delete patchPayload.online_meeting_url;
     delete patchPayload.online_meeting_info;
+    delete patchPayload.pre_appointment_instructions;
     Object.assign(
       patchPayload,
       locationPatchFields(
@@ -2008,6 +2354,16 @@ export async function DELETE(request: NextRequest) {
     const { error } = await admin.from(table).delete().eq('id', id).eq('venue_id', staff.venue_id);
 
     if (error) {
+      // A host's service on the collective page, or a member's copy of one, is refused by the
+      // engine (RN002, RN001); say why rather than failing (APP-01).
+      const context =
+        (await loadMasterSaveContext(admin, id as string, staff.venue_id)) ??
+        (await loadMemberServiceContext(admin, id as string, staff.venue_id));
+      const coded = collectiveDbError(
+        error,
+        context ? { collective: context.collectiveName, host: context.hostVenueName } : {},
+      );
+      if (coded) return NextResponse.json(coded.body, { status: coded.status });
       console.error('DELETE /api/venue/appointment-services failed:', error);
       return NextResponse.json({ error: 'Failed to delete service' }, { status: 500 });
     }

@@ -4,6 +4,8 @@ import { useRouter } from 'next/navigation';
 import { useCallback } from 'react';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import {
+  COMBINED_PAGE_DESCRIPTION_LEGACY,
+  COMBINED_PAGE_DESCRIPTION_SHARED,
   CombinedPageManagerPanel,
   CombinedPageMemberSummary,
 } from '@/components/linked-accounts/CombinedPageManager';
@@ -39,11 +41,13 @@ export function CombinedPageScopeContent({
         title={collective.name}
         description={
           collective.isHost
-            ? 'Your combined page works like a single venue. Set it up here: design, services & calendars, and members.'
+            ? view?.serviceModel === 'replicas' || collective.ownPage
+              ? COMBINED_PAGE_DESCRIPTION_SHARED
+              : COMBINED_PAGE_DESCRIPTION_LEGACY
             : `This combined page is managed by ${collective.hostVenueName}.`
         }
       />
-      <SectionCard.Body>
+      <SectionCard.Body className="!px-2 sm:!px-6">
         {view ? (
           view.isHost ? (
             <CombinedPageManagerPanel

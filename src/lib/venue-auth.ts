@@ -52,14 +52,19 @@ type StaffLookupRow = {
   role: 'admin' | 'staff';
 };
 
-function resolveUniqueStaffRow(rows: StaffLookupRow[], context: string): StaffLookupRow | null {
+const MULTIPLE_VENUES = 'multiple_venues' as const;
+
+function resolveUniqueStaffRow(
+  rows: StaffLookupRow[],
+  context: string,
+): StaffLookupRow | typeof MULTIPLE_VENUES | null {
   if (rows.length === 0) return null;
   const uniqueVenueIds = new Set(rows.map((r) => r.venue_id));
   if (uniqueVenueIds.size > 1) {
     console.error(`[${context}] Ambiguous staff membership for email (multiple venues). Refusing implicit venue selection.`, {
       venueIds: [...uniqueVenueIds],
     });
-    return null;
+    return MULTIPLE_VENUES;
   }
   return rows[0] ?? null;
 }
@@ -70,6 +75,9 @@ interface StaffIdentity {
   email: string;
   role: 'admin' | 'staff';
 }
+
+/** `multiple_venues`: the login holds unrevoked staff rows at more than one venue, which is not supported (D38). */
+type StaffResolution = StaffIdentity | typeof MULTIPLE_VENUES | null;
 
 /**
  * Short-lived in-process cache for the `userId -> staff row` resolution.
@@ -83,7 +91,7 @@ interface StaffIdentity {
  * {@link STAFF_IDENTITY_TTL_MS} to take effect. Keep this short.
  */
 const STAFF_IDENTITY_TTL_MS = 30_000;
-const staffIdentityCache = new Map<string, { value: StaffIdentity | null; expires: number }>();
+const staffIdentityCache = new Map<string, { value: StaffResolution; expires: number }>();
 
 /** Drop a cached staff identity (call after mutating a user's staff membership). */
 export function invalidateCachedStaffIdentity(userId: string): void {
@@ -95,7 +103,7 @@ async function resolveStaffIdentityUncached(
   userId: string,
   email: string | null,
   context: string,
-): Promise<StaffIdentity | null> {
+): Promise<StaffResolution> {
   const { data: byUserId, error: userIdErr } = await admin
     .from('staff')
     .select('id, venue_id, email, role, user_id')
@@ -109,6 +117,7 @@ async function resolveStaffIdentityUncached(
   }
 
   const fromUserId = resolveUniqueStaffRow((byUserId ?? []) as StaffLookupRow[], context);
+  if (fromUserId === MULTIPLE_VENUES) return MULTIPLE_VENUES;
   if (fromUserId) {
     return {
       id: fromUserId.id,
@@ -174,6 +183,7 @@ async function resolveStaffIdentityUncached(
   }
 
   const row = resolveUniqueStaffRow((rows ?? []) as StaffLookupRow[], context);
+  if (row === MULTIPLE_VENUES) return MULTIPLE_VENUES;
   if (!row) return null;
 
   // Lazy backfill: rows created before user_id was set at insert only resolve
@@ -209,7 +219,7 @@ async function resolveCachedStaffIdentity(
   userId: string,
   email: string | null,
   context: string,
-): Promise<StaffIdentity | null> {
+): Promise<StaffResolution> {
   const now = Date.now();
   const cached = staffIdentityCache.get(userId);
   if (cached && cached.expires > now) return cached.value;
@@ -266,7 +276,7 @@ export async function getVenueStaff(supabase: SupabaseClient): Promise<VenueStaf
   }
 
   const staff = await resolveCachedStaffIdentity(admin, identity.id, identity.email, 'getVenueStaff');
-  if (!staff) return null;
+  if (!staff || staff === MULTIPLE_VENUES) return null;
 
   return {
     id: staff.id,
@@ -290,6 +300,8 @@ export async function getDashboardStaff(
   role: 'admin' | 'staff' | null;
   db: SupabaseClient;
   support?: ActiveSupportSessionContext;
+  /** Set when venue_id is null because the login works at more than one venue. */
+  multipleVenues?: true;
 }> {
   const admin = getSupabaseAdminClient();
   const identity = await resolveAuthIdentity(supabase);
@@ -327,6 +339,9 @@ export async function getDashboardStaff(
 
   const normalised = identity.email?.toLowerCase().trim() ?? '';
   const staff = await resolveCachedStaffIdentity(admin, identity.id, identity.email, 'getDashboardStaff');
+  if (staff === MULTIPLE_VENUES) {
+    return { id: null, email: normalised, venue_id: null, role: null, db: admin, multipleVenues: true };
+  }
   if (!staff) {
     return { id: null, email: normalised, venue_id: null, role: null, db: admin };
   }
@@ -367,6 +382,7 @@ export async function resolveStaffVenueIdForAuthenticatedUser(
     (byUserId ?? []).map((r) => ({ ...r, id: '', role: 'staff' as const })),
     'resolveStaffVenueIdForAuthenticatedUser',
   );
+  if (fromUserId === MULTIPLE_VENUES) return null;
   if (fromUserId) return fromUserId.venue_id;
 
   const normalised = userEmail?.trim().toLowerCase() ?? '';
@@ -395,7 +411,50 @@ export async function resolveStaffVenueIdForAuthenticatedUser(
     (byEmail ?? []).map((r) => ({ ...r, id: '', role: 'staff' as const })),
     'resolveStaffVenueIdForAuthenticatedUser',
   );
-  return fromEmail?.venue_id ?? null;
+  return fromEmail && fromEmail !== MULTIPLE_VENUES ? fromEmail.venue_id : null;
+}
+
+/**
+ * Unrevoked staff rows for this email at any venue other than `venueId`.
+ *
+ * A login that works at two venues cannot open either dashboard (resolveUniqueStaffRow
+ * refuses to choose), and D38 chose to refuse such an invite rather than build a venue
+ * chooser. Matches by email and, when known, by the auth user id, because a claimed
+ * row's email can be stale.
+ */
+export async function staffMembershipElsewhere(
+  admin: SupabaseClient,
+  venueId: string,
+  email: string,
+  authUserId?: string | null,
+): Promise<boolean> {
+  const normalised = email.trim().toLowerCase();
+  const [byEmail, byUser] = await Promise.all([
+    admin
+      .from('staff')
+      .select('id', { count: 'exact', head: true })
+      .ilike('email', escapeLikePattern(normalised))
+      .neq('venue_id', venueId)
+      .is('revoked_at', null),
+    authUserId
+      ? admin
+          .from('staff')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', authUserId)
+          .neq('venue_id', venueId)
+          .is('revoked_at', null)
+      : Promise.resolve({ count: 0, error: null }),
+  ]);
+  if (byEmail.error || byUser.error) {
+    throw new Error(
+      `staff membership lookup failed: ${(byEmail.error ?? byUser.error)?.message ?? 'unknown'}`,
+    );
+  }
+  return (byEmail.count ?? 0) > 0 || (byUser.count ?? 0) > 0;
+}
+
+export function staffEmailAtOtherVenueMessage(email: string): string {
+  return `${email} is already linked to another ResNeo venue, so we cannot add them here. Invite them with a different email address.`;
 }
 
 /** True when the signed-in user has at least one active staff row (any venue). */

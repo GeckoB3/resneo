@@ -151,12 +151,12 @@ export function MultiServiceSummaryCard({
       </ul>
       <div className="mt-4 space-y-1.5 border-t border-slate-100 pt-3 text-sm">
         <div className="flex justify-between text-slate-600">
-          <span>Total duration</span>
+          <span>{lines.length > 1 ? 'Total duration' : 'Duration'}</span>
           <span className="font-medium text-slate-900">{totalDuration} min</span>
         </div>
         {hasPrice && (
           <div className="flex justify-between text-slate-600">
-            <span>Combined price</span>
+            <span>{lines.length > 1 ? 'Combined price' : 'Price'}</span>
             <span className="font-semibold text-brand-600">
               {currencySymbol}
               {(totalPrice / 100).toFixed(2)}

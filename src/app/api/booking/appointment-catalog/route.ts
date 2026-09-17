@@ -55,6 +55,8 @@ export async function GET(request: NextRequest) {
       const catalog = await loadCollectiveAppointmentCatalog(supabase, venueId, {
         includeHiddenAddons: memberStaff,
         everyCalendar: overrideRequested,
+        // Staff also see the calendars a guest cannot book right now, each with a note (§6.6).
+        includeExcludedForStaff: memberStaff,
       });
       return NextResponse.json(catalog);
     }
@@ -91,6 +93,8 @@ export async function GET(request: NextRequest) {
       practitionerSlug: practitionerSlug || undefined,
       includeHiddenAddons,
       everyCalendarEveryService: overrideRequested,
+      // A staff session sees "staff bookings only" services; the public does not.
+      audience: includeHiddenAddons ? 'staff' : 'public',
     });
     if (practitionerSlug && catalog.practitioners.length === 0) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });

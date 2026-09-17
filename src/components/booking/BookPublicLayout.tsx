@@ -40,6 +40,7 @@ import { BookOpeningHours } from '@/components/booking/BookOpeningHours';
 import type { VenuePublic } from '@/components/booking/types';
 import type { BookingPageLogoCrop } from '@/lib/booking/booking-page-logo';
 import type { BookingPageSocialLinks as BookingPageSocialLinksConfig } from '@/lib/booking/booking-page-theme';
+import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 
 interface BookPublicVenueIdentityProps {
   venue: VenuePublic;
@@ -77,6 +78,11 @@ function BookPublicVenueIdentity({
 
       <div className={venue.logo_url ? 'min-w-0 flex-1' : ''}>
         <BookVenueTitle name={venue.name} isAppointment={isAppointment} variant="dark" />
+        {venue.is_collective && (venue.collective_venue_count ?? 0) > 1 ? (
+          <p data-testid="collective-venue-count" className="mt-0.5 text-sm text-slate-500">
+            {collectiveCopy('public.header.venues', { venueCount: venue.collective_venue_count })}
+          </p>
+        ) : null}
 
         {showContactRow ? (
           <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500">

@@ -2,8 +2,10 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import { z } from 'zod';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { getVenueStaff, requireManagedCalendarAccess } from '@/lib/venue-auth';
-import { resolveBookingScopedCalendarId } from '@/lib/booking/staff-booking-calendar-scope';
+import { parkedServiceRefusal } from '@/lib/linked-accounts/replicas/parking';
+import { collectiveDbError } from '@/lib/linked-accounts/replicas/db-errors';
+import type { RpcClient } from '@/lib/linked-accounts/replicas/crons';
+import { getVenueStaff } from '@/lib/venue-auth';
 import {
   linkedGrantAllowsCalendar,
   linkedGrantAllowsMutation,
@@ -35,6 +37,11 @@ import {
   resetVisitScheduledComms,
   visitCancellationFields,
 } from '@/lib/booking/visit-write-shared';
+import {
+  applicableCalendarValues,
+  calendarDurationMinutes,
+  type CalendarAssignmentRow,
+} from '@/lib/booking/calendar-service-terms';
 
 /** The statuses that put a service on the calendar; see the schedule route. */
 const SCHEDULED_STATUSES = ['Pending', 'Booked', 'Confirmed', 'Seated'];
@@ -247,38 +254,8 @@ export async function PATCH(
         { status: 400 },
       );
     }
-    if (isOwnVenue) {
-      if (staff.role !== 'admin') {
-        // Both calendars, for the same reason the schedule route checks both:
-        // this endpoint can move a visit as well as re-service it.
-        const scopedCalendarId = await resolveBookingScopedCalendarId(
-          admin,
-          scopeVenueId,
-          rows[0]! as Parameters<typeof resolveBookingScopedCalendarId>[2],
-        );
-        if (!scopedCalendarId) {
-          return NextResponse.json(
-            {
-              error:
-                'This visit is not on a team calendar column tied to your permissions. Ask a venue admin to edit it.',
-            },
-            { status: 403 },
-          );
-        }
-        for (const calId of new Set([scopedCalendarId, calendarId])) {
-          const access = await requireManagedCalendarAccess(
-            admin,
-            scopeVenueId,
-            staff,
-            calId,
-            'You can only edit visits on calendars assigned to your account.',
-          );
-          if (!access.ok) {
-            return NextResponse.json({ error: access.error }, { status: 403 });
-          }
-        }
-      }
-    } else if (!linkedGrantAllowsCalendar(linkedGrant, false, calendarId)) {
+    // At their own venue staff edit visits on any calendar, as an admin does (2026-09-17).
+    if (!isOwnVenue && !linkedGrantAllowsCalendar(linkedGrant, false, calendarId)) {
       return NextResponse.json({ error: 'This link does not include that calendar.' }, { status: 403 });
     }
 
@@ -298,7 +275,8 @@ export async function PATCH(
     const [svcRes, variantRes, assignRes] = await Promise.all([
       admin
         .from(serviceTable)
-        .select('id, name, duration_minutes, buffer_minutes, processing_time_blocks, is_active')
+        // Both service tables carry staff_may_customize_buffer (20260330120000 and the unified schema).
+        .select('id, name, duration_minutes, buffer_minutes, processing_time_blocks, is_active, staff_may_customize_duration, staff_may_customize_buffer')
         .eq('venue_id', scopeVenueId)
         .in('id', [...wantedServiceIds]),
       admin
@@ -308,7 +286,7 @@ export async function PATCH(
       usesServiceItems
         ? admin
             .from('calendar_service_assignments')
-            .select('service_item_id, custom_duration_minutes')
+            .select('service_item_id, custom_duration_minutes, custom_buffer_minutes')
             .eq('calendar_id', calendarId)
         : admin
             .from('practitioner_services')
@@ -323,11 +301,10 @@ export async function PATCH(
         String(usesServiceItems ? a.service_item_id : a.service_id),
       ),
     );
-    const customDurationByService = new Map<string, number>();
+    const assignmentByService = new Map<string, CalendarAssignmentRow>();
     for (const a of (assignRes.data ?? []) as Array<Record<string, unknown>>) {
       const sid = String(usesServiceItems ? a.service_item_id : a.service_id);
-      const custom = a.custom_duration_minutes;
-      if (typeof custom === 'number' && Number.isFinite(custom)) customDurationByService.set(sid, custom);
+      assignmentByService.set(sid, a as CalendarAssignmentRow);
     }
 
     const catalogue = new Map<string, CatalogueServiceForVisit>();
@@ -339,9 +316,16 @@ export async function PATCH(
         name: String(svc.name ?? 'Service'),
         // A calendar's own length for the service wins, the way every other
         // appointment path resolves it.
-        durationMinutes:
-          customDurationByService.get(id) ?? Number(svc.duration_minutes ?? 30),
-        bufferMinutes: Math.max(0, Number(svc.buffer_minutes ?? 0)),
+        durationMinutes: calendarDurationMinutes(
+          Number(svc.duration_minutes ?? 30),
+          applicableCalendarValues(assignmentByService.get(id), svc),
+        ),
+        // The calendar's own buffer while the service allows one (W8), else the service's.
+        bufferMinutes: Math.max(
+          0,
+          applicableCalendarValues(assignmentByService.get(id), svc).custom_buffer_minutes ??
+            Number(svc.buffer_minutes ?? 0),
+        ),
         // The wait after the service (processing past its end), which the next
         // service in the visit stands behind along with the buffer. A variant
         // with its own pattern has its own wait; otherwise the parent's applies.
@@ -536,6 +520,25 @@ export async function PATCH(
     // run can say so.
     const outsideHours = checks.some((c) => c.result.ok && c.result.outsideHours);
 
+    // D2: a service added, or swapped in for a different one, must not be parked. A booking that
+    // keeps its service stays manageable even when that service is parked.
+    if (usesServiceItems) {
+      const parked = await parkedServiceRefusal(
+        admin as unknown as RpcClient,
+        plan.entries
+          .filter((entry) => {
+            if (entry.kind === 'add') return true;
+            if (entry.kind !== 'swap') return false;
+            const current = rowById.get(entry.bookingId!);
+            return (current?.service_item_id as string | null | undefined) !== entry.serviceId;
+          })
+          .map((entry) => ({ venueId: scopeVenueId, serviceItemId: entry.serviceId })),
+      );
+      if (parked) {
+        return NextResponse.json(parked.body, { status: parked.status });
+      }
+    }
+
     // A service being added or swapped in may carry its own compliance
     // requirement for this guest, the same gate the create and modify paths run.
     for (const entry of plan.entries) {
@@ -704,6 +707,10 @@ export async function PATCH(
         if (insErr || !inserted) {
           console.error('Visit service insert failed:', insErr);
           await rollback();
+          const collectiveRefusal = collectiveDbError(insErr);
+          if (collectiveRefusal) {
+            return NextResponse.json(collectiveRefusal.body, { status: collectiveRefusal.status });
+          }
           return NextResponse.json({ error: 'Could not add that service' }, { status: 500 });
         }
         insertedIds.push(inserted.id as string);
@@ -739,6 +746,7 @@ export async function PATCH(
         ) {
           const previousTotal = await resolveBookingTotalPenceFromRow(admin, {
             booking_total_price_pence: row.booking_total_price_pence as number | null,
+            service_price_snapshot_pence: row.service_price_snapshot_pence as number | null,
             service_variant_id: row.service_variant_id as string | null,
             addons_total_price_pence: row.addons_total_price_pence as number | null,
             venue_id: scopeVenueId,
@@ -774,6 +782,10 @@ export async function PATCH(
       if (updErr) {
         console.error('Visit service update failed:', updErr);
         await rollback();
+        const collectiveRefusal = collectiveDbError(updErr);
+        if (collectiveRefusal) {
+          return NextResponse.json(collectiveRefusal.body, { status: collectiveRefusal.status });
+        }
         return NextResponse.json({ error: 'Could not change this visit' }, { status: 500 });
       }
       if (!updated) {

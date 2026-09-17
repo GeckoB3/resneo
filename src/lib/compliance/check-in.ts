@@ -2,8 +2,8 @@
  * Reception "check-in / today" grouping (improvement plan Phase 3, gap G5).
  *
  * Pure transform over the dashboard's `missing_for_bookings` rows: keep only
- * today's bookings, group their outstanding required forms by booking, de-dupe by
- * compliance type, and order them so the soonest bookings (and hardest blocks)
+ * today's bookings, group their outstanding required forms by client, de-dupe by
+ * compliance type, and order them so the soonest arrivals (and hardest blocks)
  * surface first. Kept side-effect-free so it can be unit-tested directly.
  */
 
@@ -21,6 +21,8 @@ export interface CheckInMissingRow {
 }
 
 export interface CheckInItem {
+  /** The booking the form is outstanding for: a capture or a link is filed against it. */
+  booking_id: string;
   compliance_type_id: string;
   compliance_type_name: string;
   enforcement: string;
@@ -28,9 +30,13 @@ export interface CheckInItem {
 }
 
 export interface CheckInGroup {
+  /** One card per client (their guest id), or per booking when it has no client on file. */
+  key: string;
+  /** The client's earliest booking today with a form outstanding. */
   booking_id: string;
   guest_id: string | null;
   guest_name: string;
+  /** When the client arrives: the start of that earliest booking. */
   booking_time: string | null;
   items: CheckInItem[];
 }
@@ -40,27 +46,39 @@ function isBlocking(enforcement: string): boolean {
   return enforcement === 'block_online' || enforcement === 'block_all';
 }
 
+/** Timed bookings before untimed ones. */
+function isEarlier(time: string | null, than: string | null): boolean {
+  if (time === null) return false;
+  return than === null || time < than;
+}
+
 /**
- * Filter `missing` to bookings on `todayStr` (YYYY-MM-DD) and group by booking.
+ * Filter `missing` to bookings on `todayStr` (YYYY-MM-DD) and group by client, so a
+ * multi-service visit, or a client booked twice today, is one card at their arrival time.
  * Items are de-duplicated per compliance type (blocking variant wins) and sorted
- * blocking-first then alphabetically; groups are sorted by booking time (nulls last).
+ * blocking-first then alphabetically; groups are sorted by arrival time (nulls last).
  */
 export function groupTodaysCheckIns(missing: CheckInMissingRow[], todayStr: string): CheckInGroup[] {
-  const byBooking = new Map<string, CheckInGroup>();
+  const byClient = new Map<string, CheckInGroup>();
 
   for (const row of missing) {
     if (row.booking_date !== todayStr) continue;
 
-    let group = byBooking.get(row.booking_id);
+    const key = row.guest_id ?? `booking:${row.booking_id}`;
+    let group = byClient.get(key);
     if (!group) {
       group = {
+        key,
         booking_id: row.booking_id,
         guest_id: row.guest_id,
         guest_name: row.guest_name,
         booking_time: row.booking_time,
         items: [],
       };
-      byBooking.set(row.booking_id, group);
+      byClient.set(key, group);
+    } else if (isEarlier(row.booking_time, group.booking_time)) {
+      group.booking_id = row.booking_id;
+      group.booking_time = row.booking_time;
     }
 
     const existing = group.items.find((i) => i.compliance_type_id === row.compliance_type_id);
@@ -72,6 +90,7 @@ export function groupTodaysCheckIns(missing: CheckInMissingRow[], todayStr: stri
       continue;
     }
     group.items.push({
+      booking_id: row.booking_id,
       compliance_type_id: row.compliance_type_id,
       compliance_type_name: row.compliance_type_name,
       enforcement: row.enforcement,
@@ -79,7 +98,7 @@ export function groupTodaysCheckIns(missing: CheckInMissingRow[], todayStr: stri
     });
   }
 
-  const groups = [...byBooking.values()];
+  const groups = [...byClient.values()];
 
   for (const g of groups) {
     g.items.sort((a, b) => {

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { loadRowTotalResolver, type VisitBookingRow } from '@/lib/booking/payment-summary';
 import { loadAccessibleLinkedVenueIds } from '@/lib/linked-accounts/queries';
+import { findStaffCollectiveForVenue } from '@/lib/linked-accounts/collective-staff-scope';
 import type { LinkGrant } from '@/lib/linked-accounts/types';
 
 /**
@@ -22,6 +23,13 @@ import type { LinkGrant } from '@/lib/linked-accounts/types';
  * detail with create/edit/cancel rights (the same grant the shared diary needs
  * to show and change their bookings), the partner's calendars appear as their
  * own columns, limited to the calendars the partner scoped the link to.
+ *
+ * Collectives (Docs/collective-one-venue-plan.md §6.15, D49): every member of a
+ * live collective sees every other member's figures, named and subtotalled by
+ * venue, with the bookings made through the collective's page picked out. That
+ * visibility comes from the membership, not the links, so narrowing a link while
+ * the membership continues does not silently drop a venue (REP-05). After the
+ * membership ends only the links' own revenue grants apply again (REP-06).
  */
 
 export type BookedRevenueGrain = 'day' | 'week' | 'month';
@@ -50,6 +58,23 @@ export interface BookedRevenueCell {
   unpriced_count: number;
 }
 
+/** A venue's subtotal, with the part booked through the collective's page. */
+export interface BookedRevenueVenueCell extends BookedRevenueCell {
+  /** Of `booked_pence`, the bookings made through a collective's page. */
+  collective_booked_pence: number;
+  /** Of `no_show_pence`, the bookings made through a collective's page. */
+  collective_no_show_pence: number;
+  /** Rows (booked or no-show) made through a collective's page. */
+  collective_count: number;
+}
+
+export interface BookedRevenueVenue {
+  venue_id: string;
+  venue_name: string;
+  /** Why this report may show the venue: it is yours, a collective member, or a linked venue. */
+  access: 'own' | 'collective' | 'link';
+}
+
 export interface BookedRevenuePeriod extends BookedRevenueCell {
   /** First date of the period, YYYY-MM-DD (clamped to the requested range). */
   period_start: string;
@@ -66,17 +91,35 @@ export interface BookedRevenueReport {
   today: string;
   columns: BookedRevenueColumn[];
   periods: BookedRevenuePeriod[];
-  totals: BookedRevenueCell & { by_calendar: Record<string, BookedRevenueCell> };
+  totals: BookedRevenueCell & {
+    by_calendar: Record<string, BookedRevenueCell>;
+    /** One subtotal per venue in `venues`, so a blended total is never the only figure. */
+    by_venue: Record<string, BookedRevenueVenueCell>;
+  };
+  /** Every venue in the report, yours first. */
+  venues: BookedRevenueVenue[];
+  /** The live collective this venue belongs to, when it does. */
+  collective: { id: string; name: string } | null;
 }
 
 const UNASSIGNED_KEY = 'unassigned';
 
 const BOOKING_SELECT =
-  'id, venue_id, calendar_id, booking_date, status, group_booking_id, booking_total_price_pence, addons_total_price_pence, service_variant_id, service_item_id, appointment_service_id, practitioner_id';
+  'id, venue_id, calendar_id, booking_date, status, collective_id, group_booking_id, booking_total_price_pence, service_price_snapshot_pence, addons_total_price_pence, service_variant_id, service_item_id, appointment_service_id, practitioner_id';
 
 type RevenueBookingRow = VisitBookingRow & {
   booking_date: string;
   status: string | null;
+  collective_id?: string | null;
+};
+
+type PricedRow = {
+  booking_date: string;
+  status: string | null;
+  calendar_id: string | null;
+  venue_id: string | null;
+  collective_id?: string | null;
+  pence: number | null;
 };
 
 /** A partner venue whose calendars this report may include. */
@@ -86,6 +129,10 @@ export function grantAllowsRevenueReporting(grant: LinkGrant): boolean {
 
 function emptyCell(): BookedRevenueCell {
   return { booked_pence: 0, no_show_pence: 0, booked_count: 0, no_show_count: 0, unpriced_count: 0 };
+}
+
+function emptyVenueCell(): BookedRevenueVenueCell {
+  return { ...emptyCell(), collective_booked_pence: 0, collective_no_show_pence: 0, collective_count: 0 };
 }
 
 function addToCell(cell: BookedRevenueCell, pence: number | null, noShow: boolean): void {
@@ -199,15 +246,19 @@ export function aggregateBookedRevenue(input: {
   today: string;
   columns: BookedRevenueColumn[];
   /** Priced rows: `pence` null when the booking cannot be priced. */
-  rows: Array<{
-    booking_date: string;
-    status: string | null;
-    calendar_id: string | null;
-    venue_id: string | null;
-    pence: number | null;
-  }>;
+  rows: PricedRow[];
+  /** Defaults to one entry per venue in `columns`, the unlinked one as yours and the rest as links. */
+  venues?: BookedRevenueVenue[];
+  collective?: { id: string; name: string } | null;
 }): BookedRevenueReport {
   const { from, to, grain, today, columns } = input;
+  const venues: BookedRevenueVenue[] = input.venues ?? [];
+  if (!input.venues) {
+    for (const col of columns) {
+      if (venues.some((v) => v.venue_id === col.venue_id)) continue;
+      venues.push({ venue_id: col.venue_id, venue_name: col.venue_name, access: col.linked ? 'link' : 'own' });
+    }
+  }
   const columnByCalendar = new Map<string, BookedRevenueColumn>();
   for (const col of columns) if (col.calendar_id) columnByCalendar.set(col.calendar_id, col);
   const hasUnassigned = columns.some((c) => c.key === UNASSIGNED_KEY);
@@ -222,8 +273,9 @@ export function aggregateBookedRevenue(input: {
       by_calendar: {},
     });
   }
-  const totals: BookedRevenueReport['totals'] = { ...emptyCell(), by_calendar: {} };
+  const totals: BookedRevenueReport['totals'] = { ...emptyCell(), by_calendar: {}, by_venue: {} };
   for (const col of columns) totals.by_calendar[col.key] = emptyCell();
+  for (const v of venues) totals.by_venue[v.venue_id] = emptyVenueCell();
 
   for (const row of input.rows) {
     if (row.status === 'Cancelled') continue;
@@ -242,9 +294,32 @@ export function aggregateBookedRevenue(input: {
     addToCell(period.by_calendar[key]!, row.pence, noShow);
     addToCell(totals, row.pence, noShow);
     addToCell(totals.by_calendar[key]!, row.pence, noShow);
+
+    const venueId = columns.find((c) => c.key === key)?.venue_id ?? row.venue_id;
+    if (venueId) {
+      const venueCell = (totals.by_venue[venueId] ??= emptyVenueCell());
+      addToCell(venueCell, row.pence, noShow);
+      if (row.collective_id) {
+        venueCell.collective_count += 1;
+        if (row.pence != null) {
+          if (noShow) venueCell.collective_no_show_pence += row.pence;
+          else venueCell.collective_booked_pence += row.pence;
+        }
+      }
+    }
   }
 
-  return { from, to, grain, today, columns, periods: [...periods.values()], totals };
+  return {
+    from,
+    to,
+    grain,
+    today,
+    columns,
+    periods: [...periods.values()],
+    totals,
+    venues,
+    collective: input.collective ?? null,
+  };
 }
 
 async function loadCalendarColumns(
@@ -283,7 +358,7 @@ async function loadPricedRows(
   venueId: string,
   from: string,
   to: string,
-): Promise<Array<{ booking_date: string; status: string | null; calendar_id: string | null; venue_id: string | null; pence: number | null }>> {
+): Promise<PricedRow[]> {
   const { data, error } = await admin
     .from('bookings')
     .select(BOOKING_SELECT)
@@ -303,6 +378,7 @@ async function loadPricedRows(
     status: r.status ?? null,
     calendar_id: r.calendar_id ?? null,
     venue_id: r.venue_id ?? null,
+    collective_id: r.collective_id ?? null,
     pence: rowTotal(r),
   }));
 }
@@ -310,14 +386,36 @@ async function loadPricedRows(
 export async function buildBookedRevenueReport(
   admin: SupabaseClient,
   input: { venueId: string; venueName: string; from: string; to: string; grain: BookedRevenueGrain; today: string },
+  opts?: {
+    /**
+     * Service-role client for the collective members' rows. Their visibility comes from the
+     * membership (D49), not from a link grant the caller's own client is subject to, so a
+     * narrowed link must not hide them (REP-05). Defaults to `admin`.
+     */
+    serviceClient?: SupabaseClient;
+  },
 ): Promise<BookedRevenueReport> {
   const { venueId, venueName, from, to, grain, today } = input;
+  const serviceClient = opts?.serviceClient ?? admin;
 
-  const accessible = await loadAccessibleLinkedVenueIds(admin, venueId);
-  const partners = accessible.filter((a) => grantAllowsRevenueReporting(a.grant));
+  const [accessible, collectiveScope] = await Promise.all([
+    loadAccessibleLinkedVenueIds(admin, venueId),
+    findStaffCollectiveForVenue(serviceClient, venueId),
+  ]);
+  const collectiveMemberIds = new Set(
+    (collectiveScope?.memberVenueIds ?? []).filter((id) => id !== venueId),
+  );
+  // A live collective member is shown through the membership, with all its calendars; any other
+  // linked venue only through a link that grants revenue reporting, scoped as the link says.
+  const partners: Array<{ venueId: string; access: 'collective' | 'link'; scopeIds: string[] | null }> = [
+    ...[...collectiveMemberIds].map((id) => ({ venueId: id, access: 'collective' as const, scopeIds: null })),
+    ...accessible
+      .filter((a) => !collectiveMemberIds.has(a.venueId) && grantAllowsRevenueReporting(a.grant))
+      .map((a) => ({ venueId: a.venueId, access: 'link' as const, scopeIds: a.grant.calendarIds ?? null })),
+  ];
   const partnerNames = new Map<string, string>();
   if (partners.length > 0) {
-    const { data } = await admin
+    const { data } = await serviceClient
       .from('venues')
       .select('id, name')
       .in(
@@ -332,11 +430,12 @@ export async function buildBookedRevenueReport(
     loadPricedRows(admin, venueId, from, to),
     ...partners.map(async (p) => {
       const name = partnerNames.get(p.venueId) ?? 'Linked venue';
+      const client = p.access === 'collective' ? serviceClient : admin;
       const [columns, rows] = await Promise.all([
-        loadCalendarColumns(admin, p.venueId, name, { linked: true, scopeIds: p.grant.calendarIds ?? null }),
-        loadPricedRows(admin, p.venueId, from, to),
+        loadCalendarColumns(client, p.venueId, name, { linked: true, scopeIds: p.scopeIds }),
+        loadPricedRows(client, p.venueId, from, to),
       ]);
-      return { columns, rows };
+      return { venue: { venue_id: p.venueId, venue_name: name, access: p.access }, columns, rows };
     }),
   ]);
 
@@ -355,10 +454,21 @@ export async function buildBookedRevenueReport(
     });
   }
   const rows = [...ownRows];
+  const venues: BookedRevenueVenue[] = [{ venue_id: venueId, venue_name: venueName, access: 'own' }];
   for (const partner of partnerResults) {
     columns.push(...partner.columns);
     rows.push(...partner.rows);
+    venues.push(partner.venue);
   }
 
-  return aggregateBookedRevenue({ from, to, grain, today, columns, rows });
+  return aggregateBookedRevenue({
+    from,
+    to,
+    grain,
+    today,
+    columns,
+    rows,
+    venues,
+    collective: collectiveScope ? { id: collectiveScope.collectiveId, name: collectiveScope.name } : null,
+  });
 }

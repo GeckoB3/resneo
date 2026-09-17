@@ -127,6 +127,7 @@ export function buildDetailForExpanded(
     // block showed the service name and "Price not set" and nothing else, even
     // on a booking already paid in the app. Same trap as card_hold above.
     service_variant_price_pence: d.service_variant_price_pence ?? null,
+    service_price_snapshot_pence: d.service_price_snapshot_pence ?? null,
     booking_total_price_pence: d.booking_total_price_pence ?? null,
     amount_paid_pence: d.amount_paid_pence ?? null,
     payment_state: d.payment_state ?? null,

@@ -2,6 +2,10 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { parkedServiceRefusal } from '@/lib/linked-accounts/replicas/parking';
+import { findSamePersonClash } from '@/lib/linked-accounts/same-person';
+import { collectiveDbError } from '@/lib/linked-accounts/replicas/db-errors';
+import type { RpcClient } from '@/lib/linked-accounts/replicas/crons';
 import {
   createAppointmentSlotRecheck,
   SLOT_TAKEN_RESPONSE,
@@ -77,10 +81,8 @@ import {
   overrideWarningsForInterval,
   PAST_DATE_OVERRIDE_ERROR,
   recordAvailabilityOverrideEvent,
-  resolveOverrideCollectiveTarget,
+  resolveCollectiveTargetForRequest,
 } from '@/lib/booking/staff-availability-override';
-import { resolveCombinedBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
-import { resolveCollectiveServiceOverride } from '@/lib/linked-accounts/collective-booking-override';
 import { recordBookingWriteAudit } from '@/lib/linked-accounts/audit';
 import { notifyCrossVenueBookingWrite } from '@/lib/linked-accounts/notifications';
 
@@ -269,27 +271,25 @@ export async function POST(request: NextRequest) {
         if (!parsed.data.practitioner_id || !parsed.data.appointment_service_id) {
           return NextResponse.json({ error: 'Choose a calendar and a service.' }, { status: 400 });
         }
-        const target = staffOverride
-          ? await resolveOverrideCollectiveTarget(admin, {
-              collectiveId: collective.collectiveId,
-              offeringId: parsed.data.appointment_service_id,
-              calendarId: parsed.data.practitioner_id,
-            })
-          : await resolveCombinedBookingTarget(admin, {
-              collectiveId: collective.collectiveId,
-              offeringId: parsed.data.appointment_service_id,
-              calendarId: parsed.data.practitioner_id,
-            });
-        if (!target) {
+        const resolved = await resolveCollectiveTargetForRequest(
+          admin,
+          {
+            collectiveId: collective.collectiveId,
+            offeringId: parsed.data.appointment_service_id,
+            calendarId: parsed.data.practitioner_id,
+          },
+          staffOverride ? 'override' : 'staff',
+        );
+        if (!resolved.ok) {
           return NextResponse.json(
             {
-              error: staffOverride
-                ? 'That venue has no copy of this service, so it cannot be booked there.'
-                : 'That service is not currently bookable on this calendar.',
+              error: resolved.code || staffOverride ? resolved.error : 'That service is not currently bookable on this calendar.',
+              ...(resolved.code ? { code: resolved.code } : {}),
             },
-            { status: 400 },
+            { status: resolved.code ? 409 : 400 },
           );
         }
+        const target = resolved.target;
         collectiveAttribution = {
           collectiveId: collective.collectiveId,
           offeringId: parsed.data.appointment_service_id,
@@ -1020,6 +1020,15 @@ export async function POST(request: NextRequest) {
       const practitioner_id = parsed.data.practitioner_id as string;
       const appointment_service_id = parsed.data.appointment_service_id as string;
 
+      // D2: a venue live in a collective takes new bookings only for the collective's services, and
+      // "Override availability" does not change that.
+      const parked = await parkedServiceRefusal(admin as unknown as RpcClient, [
+        { venueId, serviceItemId: appointment_service_id },
+      ]);
+      if (parked) {
+        return NextResponse.json(parked.body, { status: parked.status });
+      }
+
       const svcWindow = await loadServiceEntityBookingWindow(
         admin,
         venueId,
@@ -1051,36 +1060,12 @@ export async function POST(request: NextRequest) {
         serviceId: appointment_service_id,
       });
 
-      // Combined booking (collective): the offering's own price and length stand
-      // in for the source service's base terms, applied BEFORE the variant and
-      // add-ons so whatever staff choose on top still stacks, exactly as the
-      // public create does. No-op for an ordinary booking.
             if (staffOverride) {
         // The loader reads the calendar's assigned services only; the override
-        // may book any active service of the venue on any calendar. Added before
-        // the collective's length is applied, so an unassigned offering gets it.
+        // may book any active service of the venue on any calendar, at its own terms.
         const present = await ensureOverrideServiceInInput(admin, appointmentInput, venueId, appointment_service_id);
         if (!present) {
           return NextResponse.json({ error: 'Service not found' }, { status: 404 });
-        }
-      }
-      let collectiveOverride: Awaited<ReturnType<typeof resolveCollectiveServiceOverride>> = null;
-      if (collectiveAttribution) {
-        collectiveOverride = await resolveCollectiveServiceOverride(admin, {
-          collectiveId: collectiveAttribution.collectiveId,
-          collectiveServiceItemId: collectiveAttribution.offeringId,
-          venueId,
-          sourceServiceId: appointment_service_id,
-          practitionerId: practitioner_id,
-        });
-        if (collectiveOverride?.durationMinutes != null) {
-          const oidx = appointmentInput.services.findIndex((s) => s.id === appointment_service_id);
-          if (oidx >= 0) {
-            appointmentInput.services[oidx] = {
-              ...appointmentInput.services[oidx]!,
-              duration_minutes: collectiveOverride.durationMinutes,
-            };
-          }
         }
       }
 
@@ -1241,12 +1226,6 @@ export async function POST(request: NextRequest) {
       if (!svc) {
         return NextResponse.json({ error: 'Service not available with this practitioner' }, { status: 400 });
       }
-      // The collective's price is the offering's BASE price; a chosen variant carries
-      // its own price and replaces it, as on a venue's own page.
-      const svcForCharge =
-        collectiveOverride?.pricePence != null && !chosenVariant
-          ? { ...svc, price_pence: collectiveOverride.pricePence }
-          : svc;
             if (staffWalkIn && !staffOverride) {
         // Walk-ins are taken "regardless": once the front desk hits Start Appointment
         // Now, the decision is final. So they may be booked past opening hours / outside
@@ -1300,7 +1279,7 @@ export async function POST(request: NextRequest) {
         practitioner_name: practRow?.name ?? null,
         appointment_service_name: svc?.name ?? null,
         appointment_price_display:
-          svcForCharge?.price_pence != null ? `£${(svcForCharge.price_pence / 100).toFixed(2)}` : null,
+          svc?.price_pence != null ? `£${(svc.price_pence / 100).toFixed(2)}` : null,
       };
 
       // Booking duration. `svc.duration_minutes` already includes the add-on extension
@@ -1337,7 +1316,7 @@ export async function POST(request: NextRequest) {
 
       const online = svc
         ? resolveAppointmentServiceOnlineChargeWithAddons({
-            svc: svcForCharge,
+            svc,
             addons_total_price_pence: chosenAddonTotals.total_price_pence,
           })
         : null;
@@ -1521,6 +1500,10 @@ export async function POST(request: NextRequest) {
 
       if (apptErr || !apptBooking) {
         console.error('Appointment booking insert failed:', apptErr?.message, apptErr?.details);
+        const collectiveRefusal = collectiveDbError(apptErr);
+        if (collectiveRefusal) {
+          return NextResponse.json(collectiveRefusal.body, { status: collectiveRefusal.status });
+        }
         return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
       }
       if (overrideWarnings) {
@@ -1733,6 +1716,24 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // D47: the same person with a calendar at another venue of the collective, already booked
+      // now. A warning for whoever booked second; the booking stands and nothing is written.
+      let samePerson: Awaited<ReturnType<typeof findSamePersonClash>> = null;
+      if (useUnifiedAppointmentStorage) {
+        try {
+          samePerson = await findSamePersonClash(admin, {
+            venueId,
+            calendarId: practitioner_id,
+            date: booking_date,
+            startTime: timeForDb,
+            endTime: (apptInsert.booking_end_time as string | null | undefined) ?? null,
+            bookingId: apptBooking.id,
+          });
+        } catch (err) {
+          console.warn('[bookings] same-person check failed:', err);
+        }
+      }
+
       if (parsed.data.staff_booking_duration_ms != null) {
         await logStaffBookingFlowEvent(admin, {
           venue_id: venueId,
@@ -1756,6 +1757,7 @@ export async function POST(request: NextRequest) {
           // audit M2: surface unmet warn_staff/warn_client requirements so the staff UI can flag them.
           ...(apptCompliance.warnings.length > 0 ? { compliance_warnings: apptCompliance.warnings } : {}),
           ...(overrideWarnings ? { availability_override_warnings: overrideWarnings } : {}),
+          ...(samePerson ? { same_person_warning: samePerson } : {}),
         },
         { status: 201 },
       );

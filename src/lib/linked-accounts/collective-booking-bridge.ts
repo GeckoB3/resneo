@@ -16,10 +16,13 @@ import {
 } from '@/lib/availability/appointment-engine';
 import { computeAppointmentAvailableDatesInMonth } from '@/lib/availability/appointment-month-availability';
 import { ANY_AVAILABLE_PRACTITIONER_ID } from '@/lib/availability/appointment-any-practitioner';
+import { loadHostAnyAvailableConfig, poolCollectiveSlots } from '@/lib/linked-accounts/collective-any-available';
 import type { PhantomBooking } from '@/lib/availability/appointment-engine';
 import { computeChainStartsForPractitioner } from '@/lib/availability/appointment-chain';
 import { prepareChainSegments, type ChainSegmentRequest, type VenueClockRow } from '@/lib/availability/appointment-chain-server';
 import { loadActiveVariantForService } from '@/lib/venue/service-variants';
+import { applyVariantToAppointmentInput } from '@/lib/appointments/service-variant';
+import type { ServiceVariant } from '@/types/booking-models';
 import { loadAddonsForBooking } from '@/lib/addons/addon-resolution';
 import { validateAddonSelections } from '@/lib/addons/addon-selection-validation';
 import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
@@ -29,6 +32,7 @@ import {
   loadServiceEntityBookingWindow,
 } from '@/lib/booking/entity-booking-window';
 import type { ServiceChainSegmentParam } from '@/lib/booking/service-chain';
+import { collectiveCopy } from './collective-copy';
 import {
   loadCollectiveAppointmentCatalog,
   type CollectiveCatalogPractitioner,
@@ -82,33 +86,87 @@ export async function resolveCombinedBookingTarget(
   };
 }
 
+export type CollectiveTargetResult =
+  | { ok: true; target: CombinedBookingTarget }
+  | { ok: false; code: 'COLLECTIVE_SERVICE_UPDATING'; error: string }
+  | { ok: false; code: null; error: string };
+
 /**
- * The length a single offering occupies on ONE provider calendar once the
- * customer's variant and add-ons are applied to that calendar's source service.
- * Mirrors the per-segment logic in `prepareChainSegments`, so a service booked
- * alone is sized the same way as one booked in a visit. Returns null when the
- * chosen variant or add-ons do not belong to this calendar's source service
- * (another member's calendar in the "any available" pool), meaning the calendar
- * cannot honour the request and offers no slots.
+ * `resolveCombinedBookingTarget` for a known audience, with the reason when it fails.
+ *
+ * Staff of a member venue may book every calendar their form lists, including the ones a guest
+ * cannot book right now (payments not set up, forms off, staff bookings only; §6.6), except a
+ * venue whose copy of the service is still catching up with the host, which is refused in words
+ * (D33). A guest who chose a calendar that has just fallen behind is asked to choose a time again.
+ * `audience: 'staff'` must only be passed once the caller is known to be a member's staff.
  */
-async function resolveOfferingDurationForCalendar(
+export async function resolveCollectiveBookingTarget(
   admin: SupabaseClient,
-  target: { venueId: string; sourceServiceId: string; durationMinutes: number | null },
-  choice: { variantId: string | null; addonIds: string[]; customDurationMinutes: number | null },
-): Promise<number | null> {
-  let duration = target.durationMinutes;
+  params: { collectiveId: string; offeringId: string; calendarId: string },
+  audience: 'public' | 'staff',
+): Promise<CollectiveTargetResult> {
+  const { practitioners } = await loadCollectiveAppointmentCatalog(admin, params.collectiveId, {
+    includeHiddenAddons: audience === 'staff',
+    includeExcludedForStaff: true,
+  });
+  const calendar = practitioners.find((p) => p.id === params.calendarId);
+  const service = calendar?.services.find((s) => s.id === params.offeringId);
+  if (!calendar || !service) {
+    return { ok: false, code: null, error: 'This booking option is no longer available.' };
+  }
+  if (service.staff_exclusion === 'behind') {
+    return {
+      ok: false,
+      code: 'COLLECTIVE_SERVICE_UPDATING',
+      error:
+        audience === 'staff'
+          ? collectiveCopy('staff.error.updating', { venue: calendar.owning_venue_name || 'that venue' })
+          : collectiveCopy('public.error.updating'),
+    };
+  }
+  if (service.staff_exclusion && audience === 'public') {
+    return { ok: false, code: null, error: 'This booking option is no longer available.' };
+  }
+  return {
+    ok: true,
+    target: {
+      venueId: calendar.owning_venue_id,
+      sourceServiceId: service.source_service_id,
+      pricePence: service.price_pence,
+      durationMinutes: service.duration_minutes,
+    },
+  };
+}
+
+/**
+ * The customer's choice resolved against ONE provider calendar's source service: the chosen
+ * option row and the add-on minutes. Null when the option or add-ons do not belong to this
+ * calendar's source service (another member's calendar in the "any available" pool), meaning
+ * the calendar cannot honour the request and offers no slots.
+ *
+ * CB-08: this used to return a single length, which the day path wrote over the service and
+ * the month path passed as a custom length. The option's own buffer and processing pattern
+ * were lost, so the combined page offered starts the member's own page does not (a buffer
+ * running into the next booking) and hid ones it does (a gap the option leaves free). The
+ * option row is now applied with `applyVariantToAppointmentInput`, exactly as the venue's own
+ * day and month routes apply it.
+ */
+async function resolveOfferingChoiceForCalendar(
+  admin: SupabaseClient,
+  target: { venueId: string; sourceServiceId: string },
+  choice: { variantId: string | null; addonIds: string[] },
+): Promise<{ variant: ServiceVariant | null; addonMinutes: number } | null> {
+  let variant: ServiceVariant | null = null;
   if (choice.variantId) {
-    const variant = await loadActiveVariantForService({
+    variant = await loadActiveVariantForService({
       admin,
       venueId: target.venueId,
       serviceId: target.sourceServiceId,
       variantId: choice.variantId,
     });
     if (!variant) return null;
-    const variantDuration = (variant as { duration_minutes?: number | null }).duration_minutes;
-    if (variantDuration != null) duration = variantDuration;
   }
-  if (choice.customDurationMinutes != null) duration = choice.customDurationMinutes;
+  let addonMinutes = 0;
   if (choice.addonIds.length > 0) {
     const schema = (await venueUsesUnifiedAppointmentServiceData(admin, target.venueId))
       ? 'service_item'
@@ -126,11 +184,9 @@ async function resolveOfferingDurationForCalendar(
       source: 'public',
     });
     if (!validation.ok) return null;
-    let delta = 0;
-    for (const a of validation.resolvedAddons) delta += a.additional_duration_minutes;
-    if (delta > 0 && duration != null) duration += delta;
+    for (const a of validation.resolvedAddons) addonMinutes += a.additional_duration_minutes;
   }
-  return duration;
+  return { variant, addonMinutes };
 }
 
 interface DaySlot {
@@ -216,19 +272,16 @@ export async function loadCollectiveDayAvailability(
     targets.map(async (t): Promise<DaySlot[]> => {
       const clock = clocks[t.venueId];
       if (!clock) return [];
-      // Size the slot for THIS calendar: the offering's length on it, plus the
-      // customer's variant and add-ons (which the public flow sends as ids, never
-      // as a pre-summed duration). A calendar that cannot honour them offers none.
-      const dur = await resolveOfferingDurationForCalendar(
+      // Size the slot for THIS calendar: its own terms for the service, with the
+      // customer's option and add-ons (which the public flow sends as ids, never as a
+      // pre-summed duration) applied as the venue's own page applies them. A calendar
+      // that cannot honour them offers none.
+      const choice = await resolveOfferingChoiceForCalendar(
         admin,
-        { venueId: t.venueId, sourceServiceId: t.sourceServiceId, durationMinutes: t.durationMinutes },
-        {
-          variantId: params.variantId ?? null,
-          addonIds: params.addonIds ?? [],
-          customDurationMinutes: params.durationMinutes ?? null,
-        },
+        { venueId: t.venueId, sourceServiceId: t.sourceServiceId },
+        { variantId: params.variantId ?? null, addonIds: params.addonIds ?? [] },
       );
-      if (dur === null && (params.variantId || (params.addonIds?.length ?? 0) > 0)) return [];
+      if (!choice) return [];
       try {
         // The source service's own booking window (minimum notice, same-day rule,
         // advance limit) applies on its calendar exactly as the venue's own day
@@ -249,9 +302,20 @@ export async function loadCollectiveDayAvailability(
           practitionerId: t.calendarId,
           serviceId: t.sourceServiceId,
         });
-        if (dur != null) {
-          const idx = input.services.findIndex((s) => s.id === t.sourceServiceId);
-          if (idx >= 0) input.services[idx] = { ...input.services[idx]!, duration_minutes: dur };
+        if (choice.variant) {
+          applyVariantToAppointmentInput({
+            services: input.services,
+            serviceId: t.sourceServiceId,
+            variant: choice.variant,
+          });
+        }
+        const idx = input.services.findIndex((s) => s.id === t.sourceServiceId);
+        if (idx >= 0) {
+          const svc = input.services[idx]!;
+          // A staff-entered length replaces the core length; add-on minutes stack on either.
+          const core = params.durationMinutes ?? svc.duration_minutes;
+          const total = core + choice.addonMinutes;
+          if (total !== svc.duration_minutes) input.services[idx] = { ...svc, duration_minutes: total };
         }
         if (params.phantoms && params.phantoms.length > 0) input.phantomBookings = params.phantoms;
         if (params.excludeBookingId) {
@@ -268,8 +332,8 @@ export async function loadCollectiveDayAvailability(
             slots.push({
               start_time: slot.start_time,
               service_id: offeringId,
-              duration_minutes: dur ?? slot.duration_minutes,
-              price_pence: t.pricePence,
+              duration_minutes: slot.duration_minutes,
+              price_pence: slot.price_pence,
               practitioner_id: t.calendarId,
               practitioner_name: t.name,
             });
@@ -283,12 +347,9 @@ export async function loadCollectiveDayAvailability(
   );
 
   if (params.anyAvailable) {
-    // Pool into one "any available" practitioner; dedupe by time (earliest/first calendar wins).
-    const byTime = new Map<string, DaySlot>();
-    for (const slot of perCalendar.flat()) {
-      if (!byTime.has(slot.start_time)) byTime.set(slot.start_time, slot);
-    }
-    const pooled = [...byTime.values()].sort((a, b) => a.start_time.localeCompare(b.start_time));
+    // Pool into one "any available" practitioner, each contested time given fairly (SB-40).
+    const config = await loadHostAnyAvailableConfig(admin, collectiveId);
+    const pooled = poolCollectiveSlots(perCalendar.flat(), config, date);
     return {
       date,
       venue_id: collectiveId,
@@ -347,19 +408,18 @@ export async function loadCollectiveMonthAvailableDates(
   const perCalendar = await Promise.all(
     targets.map(async (t) => {
       try {
-        const dur = await resolveOfferingDurationForCalendar(
+        const choice = await resolveOfferingChoiceForCalendar(
           admin,
-          { venueId: t.venueId, sourceServiceId: t.sourceServiceId, durationMinutes: t.durationMinutes },
-          {
-            variantId: params.variantId ?? null,
-            addonIds: params.addonIds ?? [],
-            customDurationMinutes: params.durationMinutes ?? null,
-          },
+          { venueId: t.venueId, sourceServiceId: t.sourceServiceId },
+          { variantId: params.variantId ?? null, addonIds: params.addonIds ?? [] },
         );
-        if (dur === null && (params.variantId || (params.addonIds?.length ?? 0) > 0)) return [] as string[];
+        if (!choice) return [] as string[];
+        // The same options the venue's own month route passes (appointment-calendar).
         return await computeAppointmentAvailableDatesInMonth(admin, t.venueId, t.calendarId, t.sourceServiceId, year, month, {
           audience: params.audience ?? 'public',
-          customDurationMinutes: dur ?? undefined,
+          variantOverride: choice.variant,
+          additionalAddonMinutes: choice.addonMinutes,
+          customDurationMinutes: params.durationMinutes ?? null,
           excludeBookingId: params.excludeBookingId ?? null,
         });
       } catch {
@@ -382,8 +442,8 @@ export async function loadCollectiveMonthAvailableDates(
 /**
  * Chain day availability for the combined page: starts at which SEVERAL
  * offerings fit back to back on one calendar. Each offering resolves per
- * calendar to its owning venue and source service, carrying the collective's
- * own length, exactly as the single-offering path above does; the slots are
+ * calendar to its owning venue and source service, at that calendar's own terms
+ * and each service's own booking window, as the venue's own page does; the slots are
  * labelled with the FIRST offering so the flow reads them unchanged.
  */
 export async function loadCollectiveChainDayAvailability(
@@ -428,7 +488,6 @@ export async function loadCollectiveChainDayAvailability(
         variantId: c.variant_id ?? null,
         addonIds: c.addon_ids ?? [],
         customDurationMinutes: c.duration_minutes ?? null,
-        durationOverrideMinutes: svc.duration_minutes,
       });
     }
     if (!offersAll) continue;
@@ -463,7 +522,10 @@ export async function loadCollectiveChainDayAvailability(
           practitionerId: t.calendarId,
           segments: t.segments,
           clock,
-          bookingModel: null,
+          // Every venue is on unified scheduling. Passing a model applies each service's own
+          // booking window (notice, advance limit) to its segment, as the venue's own page
+          // does; null skipped it, so the combined page offered visits the member refuses (CB-09).
+          bookingModel: 'unified_scheduling',
           phantoms: params.phantoms,
         });
         if (!prepared.ok) {
@@ -487,11 +549,8 @@ export async function loadCollectiveChainDayAvailability(
   if (invalid) return { ok: false, ...(invalid as { error: string; details?: unknown }) };
 
   if (params.anyAvailable) {
-    const byTime = new Map<string, DaySlot>();
-    for (const slot of perCalendar.flat()) {
-      if (!byTime.has(slot.start_time)) byTime.set(slot.start_time, slot);
-    }
-    const pooled = [...byTime.values()].sort((a, b) => a.start_time.localeCompare(b.start_time));
+    const config = await loadHostAnyAvailableConfig(admin, collectiveId);
+    const pooled = poolCollectiveSlots(perCalendar.flat(), config, date);
     return {
       ok: true,
       payload: {

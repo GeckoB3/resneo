@@ -6,12 +6,19 @@ import {
 } from './notification-prefs';
 
 describe('resolveLinkedNotificationPrefs', () => {
-  it('defaults every category off (a new link is quiet until the venue opts in)', () => {
-    expect(DEFAULT_LINKED_NOTIFICATION_PREFS).toEqual({
+  it('defaults every cross-venue category off (a new link is quiet until the venue opts in)', () => {
+    expect(DEFAULT_LINKED_NOTIFICATION_PREFS).toMatchObject({
       cancel: false,
       reschedule: false,
       create: false,
       notes: false,
+    });
+  });
+
+  it('defaults the collective categories on, because a shared page is shared on purpose', () => {
+    expect(DEFAULT_LINKED_NOTIFICATION_PREFS).toMatchObject({
+      collective_digest: true,
+      collective_calendars: true,
     });
   });
 
@@ -24,10 +31,15 @@ describe('resolveLinkedNotificationPrefs', () => {
 
   it('merges a partial blob over the defaults', () => {
     expect(resolveLinkedNotificationPrefs({ create: true })).toEqual({
-      cancel: false,
-      reschedule: false,
+      ...DEFAULT_LINKED_NOTIFICATION_PREFS,
       create: true,
-      notes: false,
+    });
+  });
+
+  it('stores a collective venue turning its digest off', () => {
+    expect(resolveLinkedNotificationPrefs({ collective_digest: false })).toEqual({
+      ...DEFAULT_LINKED_NOTIFICATION_PREFS,
+      collective_digest: false,
     });
   });
 
@@ -38,9 +50,15 @@ describe('resolveLinkedNotificationPrefs', () => {
   });
 
   it('lets a venue turn everything off', () => {
-    expect(
-      resolveLinkedNotificationPrefs({ cancel: false, reschedule: false, create: false, notes: false }),
-    ).toEqual({ cancel: false, reschedule: false, create: false, notes: false });
+    const off = {
+      cancel: false,
+      reschedule: false,
+      create: false,
+      notes: false,
+      collective_digest: false,
+      collective_calendars: false,
+    };
+    expect(resolveLinkedNotificationPrefs(off)).toEqual(off);
   });
 });
 

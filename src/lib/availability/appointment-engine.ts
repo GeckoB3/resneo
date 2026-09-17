@@ -58,6 +58,13 @@ import {
   blockSourcesFromVenueRow,
 } from '@/lib/availability/blocked-range-models';
 import { VENUE_WIDE_BLOCK_SELECT } from '@/lib/availability/venue-wide-blocks-fetch';
+import {
+  applicableCalendarValues,
+  CALENDAR_ASSIGNMENT_LINK_COLUMNS,
+  calendarDurationMinutes,
+  calendarPricePence,
+  type CalendarAssignmentRow,
+} from '@/lib/booking/calendar-service-terms';
 
 // Types
 
@@ -1518,13 +1525,13 @@ export function serviceItemRowToEngineService(
   venueId: string,
   custom?: { custom_duration_minutes?: number | null; custom_price_pence?: number | null } | null,
 ): AppointmentService {
-  const customDur = custom?.custom_duration_minutes;
-  const customPrice = custom?.custom_price_pence;
   const canon = canonicalServiceShape({
     durationMinutes: s.duration_minutes as number,
     processingBlocks: parseProcessingTimeBlocksFromDb(s.processing_time_blocks),
   });
-  const effectiveDuration = (customDur ?? canon.durationMinutes) as number;
+  // The calendar's own length and price apply only while the service's flags allow them (D56).
+  const applicable = applicableCalendarValues(custom, s);
+  const effectiveDuration = calendarDurationMinutes(canon.durationMinutes, applicable);
   /**
    * A calendar's `custom_duration_minutes` shortens the service without
    * touching its processing pattern, so the catalogue's blocks can fall
@@ -1547,7 +1554,7 @@ export function serviceItemRowToEngineService(
     buffer_minutes: (s.buffer_minutes as number) ?? 0,
     processing_time_minutes: (s.processing_time_minutes as number) ?? 0,
     processing_time_blocks: fittedBlocks,
-    price_pence: (customPrice ?? s.price_pence) as number | null,
+    price_pence: calendarPricePence(s.price_pence as number | null, applicable),
     payment_requirement: (s.payment_requirement as ClassPaymentRequirement | undefined) ?? undefined,
     deposit_pence: (s.deposit_pence as number | null) ?? null,
     colour: (s.colour as string) ?? '#3B82F6',
@@ -1641,7 +1648,7 @@ export async function fetchCalendarAppointmentInput(params: {
 
   const { data: assignments, error: assignmentsErr } = await supabase
     .from('calendar_service_assignments')
-    .select('id, service_item_id, custom_duration_minutes, custom_price_pence')
+    .select(CALENDAR_ASSIGNMENT_LINK_COLUMNS)
     .eq('calendar_id', calendarId);
 
   if (assignmentsErr) {
@@ -1695,17 +1702,20 @@ export async function fetchCalendarAppointmentInput(params: {
    */
   const services = serviceId ? allServices.filter((s) => s.id === serviceId) : allServices;
 
+  const svcRowById = new Map(((svcRows ?? []) as Record<string, unknown>[]).map((r) => [r.id as string, r]));
   const practitionerServices: PractitionerService[] = assignList.map((a) => {
-    const row = a as {
-      id: string;
-      service_item_id: string;
-      custom_duration_minutes: number | null;
-      custom_price_pence: number | null;
-    };
+    const row = a as CalendarAssignmentRow & { id: string; service_item_id: string };
+    // The calendar's own name, description, buffer, deposit and colour, gated by the flags (W8).
+    const applicable = applicableCalendarValues(row, svcRowById.get(row.service_item_id));
     return {
       id: row.id,
       practitioner_id: calendarId,
       service_id: row.service_item_id,
+      custom_name: applicable.custom_name,
+      custom_description: applicable.custom_description,
+      custom_buffer_minutes: applicable.custom_buffer_minutes,
+      custom_deposit_pence: applicable.custom_deposit_pence,
+      custom_colour: applicable.custom_colour,
       /**
        * Deliberately NOT carried: `custom_duration_minutes` is already baked
        * into `allServices[].duration_minutes` above. Carrying it here too made
@@ -1719,7 +1729,7 @@ export async function fetchCalendarAppointmentInput(params: {
        * itself is unchanged.
        */
       custom_duration_minutes: null,
-      custom_price_pence: row.custom_price_pence,
+      custom_price_pence: applicable.custom_price_pence,
     };
   });
 

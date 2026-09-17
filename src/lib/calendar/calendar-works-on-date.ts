@@ -83,24 +83,35 @@ function intersectRanges(a: MinuteRange[], b: MinuteRange[]): MinuteRange[] {
  * which asks whether the column has hours to show, not whether it is busy, so
  * staff "block time" is deliberately not subtracted.
  */
-export function calendarHasAvailableHoursOnDate(params: {
+export function calendarHasAvailableHoursOnDate(params: CalendarAvailableRangesParams): boolean {
+  return calendarAvailableRangesOnDate(params).length > 0;
+}
+
+export interface CalendarAvailableRangesParams {
   practitioner: Practitioner;
   dateYmd: string;
   leavePeriods: PractitionerLeavePeriodInput[];
   openingHours: OpeningHours | null | undefined;
   venueWideBlocks: AvailabilityBlock[];
-}): boolean {
+}
+
+/**
+ * The venue-local minutes a calendar is open on `dateYmd`: its resolved hours (per-date
+ * override, day off, schedule period, weekly template) minus leave, within the venue's opening
+ * hours and closures. For a linked column, pass the OWNER venue's leave, hours and closures.
+ */
+export function calendarAvailableRangesOnDate(params: CalendarAvailableRangesParams): MinuteRange[] {
   const { practitioner, dateYmd, leavePeriods, openingHours, venueWideBlocks } = params;
   let open: MinuteRange[] = getWorkingRanges(practitioner, dateYmd);
-  if (open.length === 0) return false;
+  if (open.length === 0) return [];
 
   const leave = leaveForPractitionerOnDate(practitioner.id, dateYmd, leavePeriods);
-  if (leave.fullDay) return false;
+  if (leave.fullDay) return [];
   open = subtractRanges(open, leave.partial);
 
   const venue = resolveVenueWideAllowedMinuteRanges(openingHours, dateYmd, venueWideBlocks);
-  if (venue.kind === 'closed') return false;
+  if (venue.kind === 'closed') return [];
   open = venue.kind === 'allowed' ? intersectRanges(open, venue.ranges) : subtractRanges(open, venue.closures);
 
-  return open.some((r) => r.end > r.start);
+  return open.filter((r) => r.end > r.start).sort((a, b) => a.start - b.start);
 }

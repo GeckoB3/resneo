@@ -16,6 +16,7 @@ import { normalizePublicBaseUrl, publicBaseUrlHost } from '@/lib/public-base-url
 import { CalendarLimitMessage } from '@/components/dashboard/CalendarLimitMessage';
 import { Dialog } from '@/components/ui/primitives/Dialog';
 import { Button } from '@/components/ui/primitives/Button';
+import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 const PUBLIC_BOOK_ORIGIN = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
 const PUBLIC_BOOK_HOST = publicBaseUrlHost(PUBLIC_BOOK_ORIGIN);
 
@@ -41,6 +42,8 @@ export interface BookableCalendarRow {
 interface ServiceRow {
   id: string;
   name: string;
+  /** Present while the venue is in a live collective for the services on its page. */
+  collective?: { role?: string } | null;
 }
 
 interface PractitionerServiceLink {
@@ -98,6 +101,8 @@ export interface BookableCalendarsPanelProps {
   onCalendarReorderSaved?: (orderedIds: string[]) => void;
   onEditCalendar: (p: BookableCalendarRow) => void | Promise<void>;
   onAddCalendar: () => void;
+  /** Which booking models the venue has switched on; a section shows only for a model that is on. */
+  shows?: { classes: boolean; resources: boolean; events: boolean };
 }
 
 function sortCalendarsByOrder(rows: BookableCalendarRow[]): BookableCalendarRow[] {
@@ -182,6 +187,7 @@ export function BookableCalendarsPanel({
   onCalendarReorderSaved,
   onEditCalendar,
   onAddCalendar,
+  shows = { classes: true, resources: true, events: true },
 }: BookableCalendarsPanelProps) {
   const [calendarRenameSuccess, setCalendarRenameSuccess] = useState<string | null>(null);
   const [venueSlug, setVenueSlug] = useState<string | null>(null);
@@ -389,12 +395,19 @@ export function BookableCalendarsPanel({
         : 'border-slate-200/80 opacity-[0.97] ring-slate-900/[0.03]'
     }`;
 
+  const inLiveCollective = services.some((s) => Boolean(s.collective));
+
   const renderCalendarCard = (p: BookableCalendarRow, dragHandle: ReactNode | null) => {
     const columnAlerts = calendarColumnAlerts[p.id] ?? [];
-    const linkedSvcs = pLinks
+    const linkedRows = pLinks
       .filter((l) => l.practitioner_id === p.id)
-      .map((l) => services.find((s) => s.id === l.service_id)?.name)
-      .filter((n): n is string => Boolean(n));
+      .map((l) => services.find((s) => s.id === l.service_id))
+      .filter((s): s is ServiceRow => Boolean(s));
+    // Parked services stay assigned but cannot be booked, so they are listed apart. In a live
+    // collective a service with no collective block is parked too (it is not on the page).
+    const isParked = (s: ServiceRow) => s.collective?.role === 'parked' || (inLiveCollective && !s.collective);
+    const linkedSvcs = linkedRows.filter((s) => !isParked(s)).map((s) => s.name);
+    const parkedSvcs = linkedRows.filter(isParked).map((s) => s.name);
     const classNames = classTypes
       .filter((ct) => (ct.instructor_calendar_id ?? ct.instructor_id) === p.id)
       .map((ct) => ct.name);
@@ -428,6 +441,16 @@ export function BookableCalendarsPanel({
     const canMoveDown = canReorderCalendars && orderIndex >= 0 && orderIndex < orderedIds.length - 1;
 
     const chipBase = 'rounded px-1.5 py-0.5 text-[11px] font-medium leading-snug ring-1';
+    /** Services always show; the other sections only while their booking model is on. */
+    const sectionCount = 1 + Number(shows.classes) + Number(shows.resources) + Number(shows.events);
+    const sectionGrid =
+      sectionCount === 1
+        ? 'grid-cols-1'
+        : sectionCount === 2
+          ? 'grid-cols-2'
+          : sectionCount === 3
+            ? 'grid-cols-2 sm:grid-cols-3'
+            : 'grid-cols-2 sm:grid-cols-4';
 
     return (
       <>
@@ -450,13 +473,13 @@ export function BookableCalendarsPanel({
                     Inactive
                   </span>
                 )}
-                {columnAlerts.length > 0 && (
+                {shows.resources && columnAlerts.length > 0 && (
                   <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-900 ring-1 ring-amber-200/80">
                     Conflict
                   </span>
                 )}
               </div>
-              {columnAlerts.length > 0 && (
+              {shows.resources && columnAlerts.length > 0 && (
                 <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] leading-snug text-amber-950">
                   <p className="font-semibold text-amber-950">Resource availability overlap</p>
                   <ul className="mt-1 list-inside list-disc space-y-0.5 text-amber-900/95">
@@ -470,7 +493,7 @@ export function BookableCalendarsPanel({
                   </p>
                 </div>
               )}
-              <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-4">
+              <dl className={`mt-2 grid gap-x-3 gap-y-2 ${sectionGrid}`}>
                 <div>
                   <dt className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
                     <ServicesIcon className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />
@@ -485,13 +508,29 @@ export function BookableCalendarsPanel({
                           </li>
                         ))}
                       </ul>
-                    ) : services.length > 0 ? (
+                    ) : parkedSvcs.length === 0 && services.length > 0 ? (
                       <span className="text-[11px] text-slate-500">None</span>
-                    ) : (
+                    ) : parkedSvcs.length === 0 ? (
                       <span className="text-[11px] text-slate-400">—</span>
-                    )}
+                    ) : null}
+                    {parkedSvcs.length > 0 ? (
+                      <div className={linkedSvcs.length > 0 ? 'mt-2' : ''}>
+                        <p className="text-[11px] font-medium text-slate-500">{collectiveCopy('cal.parkedHeading')}</p>
+                        <ul className="mt-1 flex flex-wrap gap-1" aria-label={collectiveCopy('common.pill.parked')}>
+                          {parkedSvcs.map((name) => (
+                            <li
+                              key={name}
+                              className={`${chipBase} border border-dashed border-slate-300 bg-white text-slate-500 ring-transparent`}
+                            >
+                              {name}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
                   </dd>
                 </div>
+                {shows.classes ? (
                 <div>
                   <dt className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
                     <ClassIcon className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />
@@ -511,6 +550,8 @@ export function BookableCalendarsPanel({
                     )}
                   </dd>
                 </div>
+                ) : null}
+                {shows.resources ? (
                 <div>
                   <dt className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
                     <ResourceIcon className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />
@@ -530,6 +571,8 @@ export function BookableCalendarsPanel({
                     )}
                   </dd>
                 </div>
+                ) : null}
+                {shows.events ? (
                 <div className="col-span-2 sm:col-span-1">
                   <dt className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
                     <EventsIcon className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />
@@ -597,6 +640,7 @@ export function BookableCalendarsPanel({
                     )}
                   </dd>
                 </div>
+                ) : null}
               </dl>
             </div>
           </div>
@@ -759,7 +803,17 @@ export function BookableCalendarsPanel({
                 </div>
                 <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-600">
                   Each column is a bookable schedule on your public page and in the dashboard. Edit a calendar to set
-                  name, services, classes, and linked resources. Set{' '}
+                  its{' '}
+                  {[
+                    'name',
+                    'services',
+                    ...(shows.classes ? ['classes'] : []),
+                    ...(shows.events ? ['events'] : []),
+                    ...(shows.resources ? ['linked resources'] : []),
+                  ]
+                    .join(', ')
+                    .replace(/, ([^,]*)$/, ' and $1')}
+                  . Set{' '}
                   <strong className="font-medium text-slate-800">weekly hours</strong> under the{' '}
                   <Link
                     href="/dashboard/calendar-availability?tab=availability"

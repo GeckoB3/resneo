@@ -1,3 +1,5 @@
+import { resolveActiveBookingModels } from '@/lib/booking/active-models';
+import type { BookingModel } from '@/types/booking-models';
 import { canonicalServiceShape, parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
 import { NextRequest, NextResponse, after } from 'next/server';
 import { createRouteHandlerClientFromHeaders } from '@/lib/supabase/server';
@@ -22,6 +24,9 @@ import {
 } from '@/lib/guests/name';
 import { resolveBookingListRowLabels } from '@/lib/booking/booking-list-row-label';
 import type { WorkingHours } from '@/types/booking-models';
+import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
+import type { CalendarScheduleRow } from '@/lib/availability/calendar-hours';
+import type { PractitionerLeavePeriodInput } from '@/lib/calendar/schedule-closure-blocks';
 import {
   DEFAULT_RESOURCE_MIN_BOOKING_MINUTES,
   DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
@@ -68,6 +73,19 @@ async function loadLinkedResourcesForCalendar(
   venueId: string,
   columnIds: ReadonlySet<string>,
 ): Promise<LinkedResource[]> {
+  // Rooms and other resources show only while the owning venue has resources switched on.
+  const { data: venueRow } = await admin
+    .from('venues')
+    .select('pricing_tier, booking_model, enabled_models, active_booking_models')
+    .eq('id', venueId)
+    .maybeSingle();
+  const activeModels = resolveActiveBookingModels({
+    pricingTier: venueRow?.pricing_tier as string | null | undefined,
+    bookingModel: venueRow?.booking_model as BookingModel | undefined,
+    enabledModels: venueRow?.enabled_models,
+    activeBookingModels: venueRow?.active_booking_models,
+  });
+  if (!activeModels.includes('resource_booking')) return [];
   const { data: rows } = await admin
     .from('unified_calendars')
     .select(
@@ -155,12 +173,14 @@ export async function GET(request: NextRequest) {
     const venueIds = accessible.map((a) => a.venueId);
     const { data: venueRows } = await admin
       .from('venues')
-      .select('id, name, timezone')
+      .select('id, name, timezone, opening_hours')
       .in('id', venueIds);
     const venueNames: Record<string, string> = {};
     const venueTimezones: Record<string, string> = {};
+    const venueOpeningHours: Record<string, OpeningHours | null> = {};
     for (const v of venueRows ?? []) {
       const id = v.id as string;
+      venueOpeningHours[id] = (v.opening_hours as OpeningHours | null | undefined) ?? null;
       venueNames[id] = (v.name as string) ?? 'Linked venue';
       const tzRaw = v.timezone as string | null | undefined;
       venueTimezones[id] =
@@ -182,7 +202,9 @@ export async function GET(request: NextRequest) {
       if (usesUnified) {
         const { data: calendarRows } = await admin
           .from('unified_calendars')
-          .select('id, name, is_active, calendar_type, working_hours')
+          .select(
+            'id, name, is_active, calendar_type, working_hours, break_times, break_times_by_day, days_off, availability_exceptions, schedule_periods, working_hours_rota',
+          )
           .eq('venue_id', access.venueId)
           .order('sort_order', { ascending: true });
         practitioners = (calendarRows ?? [])
@@ -192,6 +214,18 @@ export async function GET(request: NextRequest) {
             name: (c.name as string) ?? 'Calendar',
             isActive: (c.is_active as boolean) ?? true,
             workingHours: linkedWorkingHoursFromDb(c.working_hours),
+            // The owner's full schedule, so a partner column shows the hours the owner's own
+            // diary shows (SB-39), not the bare weekly template.
+            schedule: {
+              working_hours: linkedWorkingHoursFromDb(c.working_hours),
+              break_times: (c.break_times as CalendarScheduleRow['break_times']) ?? [],
+              break_times_by_day: (c.break_times_by_day as CalendarScheduleRow['break_times_by_day']) ?? null,
+              days_off: (c.days_off as string[] | null) ?? [],
+              availability_exceptions:
+                (c.availability_exceptions as CalendarScheduleRow['availability_exceptions']) ?? null,
+              schedule_periods: c.schedule_periods ?? null,
+              working_hours_rota: c.working_hours_rota ?? null,
+            },
           }));
       } else {
         const { data: practitionerRows } = await admin
@@ -467,6 +501,30 @@ export async function GET(request: NextRequest) {
         };
       });
 
+      // The owner venue's hours context: its opening hours, venue-wide closures and amended hours,
+      // and leave on the calendars this link shows. Leave carries no notes, so a time-only link
+      // learns only when a calendar is unavailable, which the column already shows.
+      const scheduledIds = practitioners.map((p) => p.id);
+      const [venueWideRes, leaveRes] = await Promise.all([
+        admin.from('availability_blocks').select('*').eq('venue_id', access.venueId).is('service_id', null),
+        scheduledIds.length > 0
+          ? admin
+              .from('practitioner_leave_periods')
+              .select('practitioner_id, start_date, end_date, unavailable_start_time, unavailable_end_time, leave_type')
+              .eq('venue_id', access.venueId)
+              .in('practitioner_id', scheduledIds)
+              .lte('start_date', rangeTo)
+              .gte('end_date', rangeFrom)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+      if (venueWideRes.error) console.error('GET /api/venue/linked-calendar venue blocks failed:', venueWideRes.error.message);
+      if (leaveRes.error) console.error('GET /api/venue/linked-calendar leave failed:', leaveRes.error.message);
+      const hours = {
+        openingHours: venueOpeningHours[access.venueId] ?? null,
+        venueWideBlocks: (venueWideRes.data ?? []) as AvailabilityBlock[],
+        leavePeriods: (leaveRes.data ?? []) as PractitionerLeavePeriodInput[],
+      };
+
       const scheduleBlocks = fullDetails
         ? await buildLinkedVenueScheduleBlocks(
             admin,
@@ -513,6 +571,7 @@ export async function GET(request: NextRequest) {
         resources,
         bookings: scopedBookings,
         scheduleBlocks,
+        hours,
       };
       }),
     );

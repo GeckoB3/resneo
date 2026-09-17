@@ -55,6 +55,8 @@ export default function PaymentPage() {
   const [selectionHydrated, setSelectionHydrated] = useState(false);
   /** Logged-in user already has the other plan family: block checkout before hitting Stripe. */
   const [planFamilyBlocked, setPlanFamilyBlocked] = useState(false);
+  /** Logged-in user is a team member at a venue they do not own: checkout refuses (D38). */
+  const [teamMemberMessage, setTeamMemberMessage] = useState<string | null>(null);
   /** Referral state — when present, the trial is extended by REFERRAL_REFEREE_BONUS_DAYS. */
   const [referralValid, setReferralValid] = useState<ReferralValidationOk | null>(null);
   /** Sales code — takes precedence; grants the code's own free trial (`salesValid.trial_days`). */
@@ -137,7 +139,16 @@ export default function PaymentPage() {
     void (async () => {
       const res = await fetch('/api/signup/existing-plan', { credentials: 'same-origin' });
       if (!res.ok || cancelled) return;
-      const data = (await res.json()) as { hasVenue?: boolean; planFamily?: 'appointments' | 'restaurant' };
+      const data = (await res.json()) as {
+        hasVenue?: boolean;
+        planFamily?: 'appointments' | 'restaurant';
+        teamMember?: boolean;
+        message?: string;
+      };
+      if (data.teamMember && data.message) {
+        setTeamMemberMessage(data.message);
+        return;
+      }
       if (!data.hasVenue || !data.planFamily) return;
       const requested = signupPlanToFamily(plan);
       if (requested !== data.planFamily) {
@@ -383,6 +394,12 @@ export default function PaymentPage() {
           </div>
         </div>
 
+        {teamMemberMessage && !error && (
+          <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            {teamMemberMessage}
+          </p>
+        )}
+
         {error && (
           <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>
         )}
@@ -405,7 +422,7 @@ export default function PaymentPage() {
         <button
           type="button"
           onClick={handleCheckout}
-          disabled={loading || !hasSession || planFamilyBlocked}
+          disabled={loading || !hasSession || planFamilyBlocked || teamMemberMessage !== null}
           className="mt-5 w-full rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50 transition-colors"
         >
           {loading

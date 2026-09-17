@@ -1,10 +1,14 @@
-import { notFound } from 'next/navigation';
+import type { Metadata } from 'next';
+import { notFound, redirect } from 'next/navigation';
+import { calendarPageMetadata } from '@/lib/booking/booking-page-metadata';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { getPublicVenueForBookBySlug } from '@/lib/booking/get-public-venue-for-book';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { BookPublicLayout } from '@/components/booking/BookPublicLayout';
 import { loadBookPublicLayoutData } from '@/lib/booking/load-book-public-layout-data';
 import type { LockedPractitionerBooking } from '@/components/booking/BookingFlowRouter';
+import { handoverUrl, resolveOwnPageHandover } from '@/lib/linked-accounts/replicas/page-handover';
+import { searchParamsReader, type PageSearchParams } from '../search-params';
 
 async function getActivePractitionerForBook(
   venueId: string,
@@ -26,18 +30,38 @@ async function getActivePractitionerForBook(
   return { id: data.id, name: data.name, bookingSlug };
 }
 
-export default async function BookPractitionerPage({
+export async function generateMetadata({
   params,
 }: {
   params: Promise<{ 'venue-slug': string; 'practitioner-slug': string }>;
+}): Promise<Metadata> {
+  const { 'venue-slug': venueSlug, 'practitioner-slug': practitionerSlug } = await params;
+  return calendarPageMetadata(getSupabaseAdminClient(), venueSlug, practitionerSlug);
+}
+
+export default async function BookPractitionerPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ 'venue-slug': string; 'practitioner-slug': string }>;
+  searchParams?: Promise<PageSearchParams>;
 }) {
   const { 'venue-slug': venueSlug, 'practitioner-slug': practitionerSlug } = await params;
+  const query = searchParamsReader(searchParams ? await searchParams : {});
   const venue = await getPublicVenueForBookBySlug(venueSlug);
   if (!venue) notFound();
   if (!isUnifiedSchedulingVenue(venue.booking_model)) notFound();
 
   const lockedPractitioner = await getActivePractitionerForBook(venue.id, practitionerSlug);
   if (!lockedPractitioner) notFound();
+
+  // A calendar address is an appointment link, so it hands over whenever the venue's page does
+  // (§6.9), landing on the same calendar on the collective page.
+  const admin = getSupabaseAdminClient();
+  const handover = await resolveOwnPageHandover(admin, venue.id);
+  if (handover?.redirect && !query.get('waitlist_offer')) {
+    redirect(await handoverUrl(admin, handover, venue.id, query, lockedPractitioner.id));
+  }
 
   const { services, team } = await loadBookPublicLayoutData(getSupabaseAdminClient(), venue);
 

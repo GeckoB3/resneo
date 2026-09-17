@@ -21,6 +21,8 @@ import type { VenueOpeningException } from '@/types/venue-opening-exceptions';
 import type { WorkingHours } from '@/types/booking-models';
 import type { AvailabilityBlock } from '@/types/availability';
 import type { ServiceCategoryRef } from '@/lib/booking/service-categories';
+import { collectiveCopy, formatVenueList } from '@/lib/linked-accounts/collective-copy';
+import { EditReachNote } from '@/components/linked-accounts/collective/CollectivePills';
 
 function parsePositivePounds(value: string): boolean {
   const t = value.trim().replace(/,/g, '');
@@ -62,6 +64,15 @@ export interface AppointmentServiceFormFieldsProps {
    * the import wizard).
    */
   categories?: ServiceCategoryRef[];
+  /**
+   * The collective this venue shares a page with, when it is in one (W5). It changes two things
+   * here: who "staff bookings only" applies to, and whether a calendar may rename the service.
+   */
+  collectiveName?: string | null;
+  /** True for a service on the collective page: guests see one name everywhere (D29). */
+  collectiveNameLocked?: boolean;
+  /** The venues a save reaches, for the permissions reach line. */
+  collectiveVenueNames?: string[];
 }
 
 export function AppointmentServiceFormFields({
@@ -78,6 +89,9 @@ export function AppointmentServiceFormFields({
   calendarsSection,
   hideStaffMaySection = false,
   staffNotice,
+  collectiveName = null,
+  collectiveNameLocked = false,
+  collectiveVenueNames = [],
   categories = [],
 }: AppointmentServiceFormFieldsProps) {
   const usesVariants = isAdmin && form.variants.length > 0;
@@ -104,8 +118,11 @@ export function AppointmentServiceFormFields({
       {staffNotice}
 
       <div>
-        <label className="mb-1 block text-sm font-medium text-slate-700">Name *</label>
+        <label htmlFor={`service-name-${fieldGroupSuffix}`} className="mb-1 block text-sm font-medium text-slate-700">
+          Name *
+        </label>
         <input
+          id={`service-name-${fieldGroupSuffix}`}
           type="text"
           value={form.name}
           onChange={(e) => setForm({ ...form, name: e.target.value })}
@@ -874,6 +891,25 @@ export function AppointmentServiceFormFields({
         <span className="text-sm text-slate-700">Active (visible to clients)</span>
       </div>
 
+      {isAdmin ? (
+        <div>
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={form.is_bookable_online === false}
+              onChange={(e) => setForm({ ...form, is_bookable_online: !e.target.checked })}
+              className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-600"
+            />
+            {collectiveCopy('svc.form.staffOnly.label')}
+          </label>
+          <p className="mt-1 text-xs text-slate-500">
+            {collectiveName
+              ? collectiveCopy('svc.form.staffOnly.help.collective', { collective: collectiveName })
+              : collectiveCopy('svc.form.staffOnly.help')}
+          </p>
+        </div>
+      ) : null}
+
       {isAdmin && !hideStaffMaySection && (
         <div className="min-w-0 max-w-full space-y-3 rounded-lg border border-slate-200 bg-slate-50/90 p-4">
           <p className="text-sm font-medium text-slate-800">Optional overrides per calendar</p>
@@ -902,22 +938,42 @@ export function AppointmentServiceFormFields({
                 ['colour', 'Colour'],
               ] as const
             ).map(([key, label]) => (
-              <label key={key} className="flex items-center gap-2 text-sm text-slate-700">
+              <label
+                key={key}
+                className={`flex items-center gap-2 text-sm ${
+                  collectiveNameLocked && (key === 'name' || key === 'description')
+                    ? 'text-slate-400'
+                    : 'text-slate-700'
+                }`}
+              >
                 <input
                   type="checkbox"
                   checked={form.staffMay[key]}
+                  // A service on the collective page reads the same on every calendar at every
+                  // venue, so no calendar may rename or re-describe it (D29).
+                  disabled={collectiveNameLocked && (key === 'name' || key === 'description')}
                   onChange={(e) =>
                     setForm((prev) => ({
                       ...prev,
                       staffMay: { ...prev.staffMay, [key]: e.target.checked },
                     }))
                   }
-                  className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                  className="h-4 w-4 rounded border-slate-300 text-blue-600 disabled:opacity-50"
                 />
                 {label}
               </label>
             ))}
           </div>
+          {collectiveNameLocked && collectiveName ? (
+            <p className="text-xs text-slate-500">
+              {collectiveCopy('svc.form.staffMay.nameLocked', { collective: collectiveName })}
+            </p>
+          ) : null}
+          {collectiveName && collectiveVenueNames.length > 0 ? (
+            <EditReachNote>
+              {collectiveCopy('svc.form.staffMay.reach', { venueList: formatVenueList(collectiveVenueNames) })}
+            </EditReachNote>
+          ) : null}
         </div>
       )}
 

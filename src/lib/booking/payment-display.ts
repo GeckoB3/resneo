@@ -60,6 +60,8 @@ export interface PaymentDisplayBooking {
   deposit_amount_pence?: number | null;
   service_variant_name?: string | null;
   service_variant_price_pence?: number | null;
+  /** The service line's price when booked; wins over the live option price. */
+  service_price_snapshot_pence?: number | null;
   booking_total_price_pence?: number | null;
   addons?: Array<{
     id?: string;
@@ -101,6 +103,7 @@ export function toPaymentDisplayBooking(args: {
     deposit_amount_pence: args.depositAmountPence ?? null,
     service_variant_name: s?.service_variant_name ?? null,
     service_variant_price_pence: s?.service_variant_price_pence ?? null,
+    service_price_snapshot_pence: s?.service_price_snapshot_pence ?? null,
     booking_total_price_pence: s?.booking_total_price_pence ?? null,
     addons: s?.addons,
     addons_total_price_pence: s?.addons_total_price_pence ?? null,
@@ -160,7 +163,8 @@ export interface PriceSummaryRow {
 export function buildPriceSummary(booking: PaymentDisplayBooking): PriceSummaryRow[] {
   const rows: PriceSummaryRow[] = [];
 
-  const variantPence = booking.service_variant_price_pence ?? null;
+  // The price agreed at booking time, else the option's live price (older bookings).
+  const variantPence = booking.service_price_snapshot_pence ?? booking.service_variant_price_pence ?? null;
   const serviceLabel = booking.service_variant_name?.trim() || null;
   const addons = booking.addons ?? [];
 

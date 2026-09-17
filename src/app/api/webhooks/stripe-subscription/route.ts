@@ -34,7 +34,7 @@ import {
 } from '@/lib/referrals/credit-referrer';
 import { attachSalesAttributionOnSignup } from '@/lib/sales/attach-on-signup';
 import { clearSignupPendingUserMetadata } from '@/lib/signup-pending-metadata';
-import { escapeLikePattern } from '@/lib/db/like-escape';
+import { getExistingVenueForUserEmail, hasUnrevokedStaffMembership } from '@/lib/signup-existing-venue';
 import { recordSalesInvoiceRevenue } from '@/lib/sales/invoice-revenue';
 import { syncSalesAttributionWithPlanStatus } from '@/lib/sales/churn';
 import { recordPlatformInvoice } from '@/lib/platform/invoices';
@@ -338,21 +338,28 @@ async function handleCheckoutCompleted(
     }
   }
 
-  // Also check by user email via staff table
+  // Also check whether the user already owns a venue (an active admin row).
   const { data: userData } = await supabase.auth.admin.getUserById(supabaseUserId);
   const userEmail = userData?.user?.email;
-  if (userEmail) {
-    const { count: existingStaffCount } = await supabase
-      .from('staff')
-      .select('*', { count: 'exact', head: true })
-      .ilike('email', escapeLikePattern(userEmail.toLowerCase().trim()))
-      .limit(1);
+  if (userEmail && (await getExistingVenueForUserEmail(supabase, userEmail))) {
+    console.log('[Subscription webhook] User already owns a venue:', supabaseUserId);
+    await clearSignupPendingUserMetadata(supabase, supabaseUserId);
+    return;
+  }
 
-    if ((existingStaffCount ?? 0) > 0) {
-      console.log('[Subscription webhook] Staff record already exists for', userEmail);
-      await clearSignupPendingUserMetadata(supabase, supabaseUserId);
-      return;
-    }
+  // Staff at a venue they do not own. This used to count as "already provisioned", which
+  // left a paying subscription with no venue. A second venue would lock the login out of
+  // both (D38), so create nothing, and log it loudly: the subscription needs cancelling by
+  // hand. create-checkout refuses this before payment. Revoked rows do not count.
+  if (await hasUnrevokedStaffMembership(supabase, supabaseUserId, userEmail)) {
+    console.error('[Subscription webhook] Paid checkout for a login that is staff at a venue; no venue created', {
+      userId: supabaseUserId,
+      stripeCustomerId: customerId ?? null,
+      stripeSubscriptionId: typeof session.subscription === 'string' ? session.subscription : null,
+      sessionId: session.id,
+    });
+    await clearSignupPendingUserMetadata(supabase, supabaseUserId);
+    return;
   }
 
   const config = getBusinessConfig(businessType);

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { applyReplicasCatalogueAction } from '@/lib/linked-accounts/replicas/catalogue-shims';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveLinkAdmin, enforceLinkRateLimit } from '@/lib/linked-accounts/route-helpers';
 import { catalogueActionSchema, type CatalogueActionInput } from '@/lib/linked-accounts/validation';
@@ -96,6 +97,40 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         { error: 'Only the host venue can manage the combined page.' },
         { status: 403 },
       );
+    }
+
+    // On the shared-services model the older actions go to the engine, or answer with a code (W11).
+    const { data: model } = await ctx.admin
+      .from('venue_collectives')
+      .select('service_model, name')
+      .eq('id', id)
+      .maybeSingle();
+    if (model?.service_model === 'replicas') {
+      const shimmed = await applyReplicasCatalogueAction(
+        {
+          admin: ctx.admin,
+          collectiveId: id,
+          collectiveName: (model.name as string | null) ?? 'your collective',
+          hostVenueId: ctx.venueId,
+          hostVenueName: ctx.venue.name,
+          userId: ctx.userId,
+        },
+        input,
+      );
+      invalidateCollectiveCatalogMemo(id);
+      const catalogue = await loadCatalogueForManagement(ctx.admin, id);
+      if (!shimmed.ok) {
+        return NextResponse.json(
+          {
+            error: shimmed.error,
+            ...(shimmed.code ? { code: shimmed.code } : {}),
+            ...(shimmed.results ? { results: shimmed.results } : {}),
+            catalogue,
+          },
+          { status: shimmed.status },
+        );
+      }
+      return NextResponse.json({ catalogue, ...(shimmed.results ? { results: shimmed.results } : {}) });
     }
 
     const result = await applyCatalogueAction(ctx.admin, id, ctx.venueId, ctx.userId, input);

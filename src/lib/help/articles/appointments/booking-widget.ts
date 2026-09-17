@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: 'Your booking page, embed, and QR code',
   description: 'Every public address your venue has, the two-line embed code and how it resizes, the accent colour, ?tab= deep links, QR codes, and how widget bookings appear in reports.',
   tags: ['embed', 'widget', 'iframe', 'qr', 'marketing', 'accent colour', 'resize.js', 'tab', 'combined page', 'collective'],
-  verified: '2026-09-12',
+  verified: '2026-09-17',
   content: `
 # Meet clients wherever they browse
 
@@ -54,9 +54,9 @@ Changing the colour rewrites the \`?accent=\` part of the snippet, so copy the c
 
 ### Embedding a combined page
 
-If your venue belongs to a venue collective with at least one other active member, a **What to embed** dropdown appears above the colour: **My venue only** with your venue name, or **Venue collective** with the collective's name. Choosing the collective swaps the snippet to the combined page.
+If your venue belongs to a venue collective with at least one other active member, a **What to embed** dropdown appears above the colour: **My venue only** with your venue name, or **Venue collective:** and the collective's name. Choosing the collective swaps the snippet to the collective page's own embed, which stretches with \`resize.js\` and takes your accent colour just like your venue's. The QR code then opens the collective page and is named after it.
 
-Two things behave differently there. The combined page is a full web page rather than the slimmed-down embed, so it does not report its height and \`resize.js\` cannot stretch the frame: raise the \`height\` number in the iframe line yourself until it fits. It also uses the collective's own colour, so the accent colour has no effect on it.
+While the collective page is live and your calendars are on it, an embed of **My venue only** shows the collective page in its place, so clients book the same services wherever they find you. If your venue also runs classes, events or bookable rooms, your own embed keeps those and links to the collective page for appointments.
 
 ## Opening a specific tab
 
@@ -102,7 +102,8 @@ For appointments, classes, events and resources, a booking made in the embed is 
 | **Copy code** does nothing | Your browser blocked clipboard access | Select the code in the grey box above the button and copy it by hand |
 | \`?tab=\` is ignored | That booking type is not switched on, or only one type is on | Turn the type on under **Settings → Booking Settings** |
 | The embed shows no times to book | The same reason the hosted page would: no service on a calendar with working hours | See [set up your services](/help/getting-started/services) |
-| A combined page embed is clipped | The combined page does not report its height, so the resize script cannot help | Raise the \`height\` number in the iframe line until it fits |
+| A collective embed is clipped | The snippet was copied before the collective page had its own embed, so it points at \`/book/c/\` | Choose the collective under **What to embed** and copy the code again |
+| My venue embed shows the collective page | Your venue is on a live collective page, which takes over your own page and embed for appointments | Nothing to fix. It goes back to your own page if you leave the collective |
 | A printed QR code stopped working | Your booking page address changed | Download a fresh code. Anything already printed is dead |
 | The widget went blank after a change | You changed your booking page address, so the old \`/embed/\` address no longer exists | Copy the new embed code and replace it on your site |
 

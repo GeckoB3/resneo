@@ -148,7 +148,7 @@ function venueDataWith(categories: Record<string, { name: string; sort_order: nu
       },
     ]),
   );
-  return { services, calendars: new Map(), serviceCalendars: new Map(), serviceList: [], calendarList: [] };
+  return { services, calendars: new Map(), serviceCalendars: new Map(), calendarServiceTerms: new Map(), serviceList: [], calendarList: [] };
 }
 
 beforeEach(() => {

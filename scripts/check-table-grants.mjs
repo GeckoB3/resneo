@@ -159,6 +159,68 @@ async function main() {
     );
   }
 
+  // -- collective_column_classes (W3a) -----------------------------------------
+  // Service role only: the registry decides which columns travel between businesses, and
+  // hosted defaults grant client roles on new tables whatever the migration revoked.
+  for (const role of ['anon', 'authenticated']) {
+    const row = grant('collective_column_classes', role);
+    check(
+      `collective_column_classes: ${role} holds nothing`,
+      row === null,
+      `live: ${fmt(row)}. The column registry is service-role only.`,
+    );
+  }
+
+  // -- Collective engine tables (W3, 20270215120000) ---------------------------
+  // Service role only: replica links, revisions, the engine's audit trail and lifecycle jobs decide
+  // what reaches other businesses. Hosted defaults grant client roles on every new table.
+  for (const rel of [
+    'collective_service_replicas',
+    'collective_catalogue_revisions',
+    'collective_audit_events',
+    'collective_operations',
+  ]) {
+    for (const role of ['anon', 'authenticated']) {
+      const row = grant(rel, role);
+      check(
+        `${rel}: ${role} holds nothing`,
+        row === null,
+        `live: ${fmt(row)}. Apply supabase/migrations/20270215120000_collective_engine_schema.sql`,
+      );
+    }
+  }
+
+  // -- platform_settings (D37, 20270218230000) --------------------------------
+  // Service role only: it decides which model every new collective starts on.
+  for (const role of ['anon', 'authenticated']) {
+    const row = grant('platform_settings', role);
+    check(
+      `platform_settings: ${role} holds nothing`,
+      row === null,
+      `live: ${fmt(row)}. Apply supabase/migrations/20270218230000_platform_settings.sql`,
+    );
+  }
+
+  // -- Service catalogue and collective tables (W15, 20270214120000) ----------
+  // anon may keep SELECT (RLS returns nothing without a policy) but no write privilege. Hosted
+  // defaults grant client roles on every new table, so a table created after the migration
+  // would come back writable; add it to the migration's list and to this one.
+  for (const rel of [
+    'service_items', 'service_variants', 'addon_groups', 'addons', 'service_addon_groups',
+    'calendar_service_assignments', 'practitioner_services', 'appointment_services',
+    'service_categories', 'compliance_types', 'compliance_type_versions',
+    'service_compliance_requirements', 'venue_collectives', 'venue_collective_members',
+    'collective_service_items', 'collective_service_providers', 'collective_service_categories',
+  ]) {
+    const row = grant(rel, 'anon');
+    const writes = (row?.table_privileges ?? []).filter((p) => p !== 'SELECT');
+    check(
+      `${rel}: anon holds no write privilege`,
+      writes.length === 0,
+      `live: ${fmt(row)}. Apply supabase/migrations/20270214120000_service_catalogue_anon_reads_and_writes.sql`,
+    );
+  }
+
   // -- user_devices (P0-13) --------------------------------------------------
   // The audience column is added by migration 20270121120000, and the client
   // writes it through the session client under RLS. A relation-wide grant

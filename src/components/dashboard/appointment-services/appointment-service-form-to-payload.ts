@@ -185,6 +185,7 @@ export function appointmentServiceFormToPayload(
     payload.staff_may_customize_colour = form.staffMay.colour;
     // null clears the category; the server checks the id belongs to the venue.
     payload.category_id = form.category_id ?? null;
+    payload.is_bookable_online = form.is_bookable_online;
     payload.custom_availability_enabled = form.custom_availability_enabled;
     payload.custom_working_hours = form.custom_availability_enabled ? form.custom_working_hours : null;
     payload.processing_time_blocks = usesVariantsPayload ? [] : form.processing_time_blocks;

@@ -5,7 +5,7 @@ export const article: HelpArticle = {
   title: 'Staff accounts, roles and permissions',
   description: 'The Staff tab: your own password, invites, Admin vs Staff, calendar assignments, the auto-logout timer and plan caps.',
   tags: ['staff', 'roles', 'permissions', 'invites', 'session timeout'],
-  verified: '2026-09-12',
+  verified: '2026-09-17',
   content: `
 # Staff accounts, roles and permissions
 
@@ -51,7 +51,7 @@ Only **active bookable calendars** appear in the list, and resource calendars ne
 | **Reports** | Yes | No |
 | Inviting people, changing roles, resetting passwords, the **Auto-Logout Timer** | Yes | No |
 
-The **Role Permissions** box at the bottom of the card sums this up on screen: **Admin** has full access to all settings, staff management, reports and bookings, while **Staff** work in the dashboard for day to day operations, schedule, bookings and guest details for the calendars you assign.
+The **Role Permissions** box at the bottom of the card sums this up on screen: **Admin** has full access to all settings, staff management, reports and bookings, while **Staff** work with every booking and guest in the dashboard, and set up hours and services for the calendars you assign.
 
 > **You cannot change your own role or remove your own login.** ResNeo answers **You cannot change your own role** and **You cannot remove yourself**. To step back from Admin, make someone else an Admin first and ask them to change you.
 
@@ -104,7 +104,7 @@ The timer applies to everyone at the venue, including you.
 | The invitation never arrived | It went to spam, the address was mistyped, or they already had a ResNeo login | Check the address, use **Resend invitation email**, or ask them to try **Forgot password?** on the login page |
 | I cannot change my own role | ResNeo will not let anyone change or remove their own login | Ask another admin to do it |
 | A team member cannot edit their hours | Their login is not assigned to that calendar | Tick that calendar on their row |
-| A team member can see other people's bookings | This is expected. They can browse every calendar, but only change the ones assigned to them | Review their calendars on this tab |
+| A team member can change other people's bookings | This is expected. Team members work with bookings on every calendar, as admins do. Their assigned calendars only limit hours, closures and service settings | Nothing to fix |
 | Everyone keeps getting signed out | The **Auto-Logout Timer** is short | Raise it under **Security settings**, then **Save** |
 
 ## Next steps

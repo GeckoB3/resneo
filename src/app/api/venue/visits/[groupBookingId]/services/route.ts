@@ -5,8 +5,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { parkedServiceRefusal } from '@/lib/linked-accounts/replicas/parking';
 import { collectiveDbError } from '@/lib/linked-accounts/replicas/db-errors';
 import type { RpcClient } from '@/lib/linked-accounts/replicas/crons';
-import { getVenueStaff, requireManagedCalendarAccess } from '@/lib/venue-auth';
-import { resolveBookingScopedCalendarId } from '@/lib/booking/staff-booking-calendar-scope';
+import { getVenueStaff } from '@/lib/venue-auth';
 import {
   linkedGrantAllowsCalendar,
   linkedGrantAllowsMutation,
@@ -255,38 +254,8 @@ export async function PATCH(
         { status: 400 },
       );
     }
-    if (isOwnVenue) {
-      if (staff.role !== 'admin') {
-        // Both calendars, for the same reason the schedule route checks both:
-        // this endpoint can move a visit as well as re-service it.
-        const scopedCalendarId = await resolveBookingScopedCalendarId(
-          admin,
-          scopeVenueId,
-          rows[0]! as Parameters<typeof resolveBookingScopedCalendarId>[2],
-        );
-        if (!scopedCalendarId) {
-          return NextResponse.json(
-            {
-              error:
-                'This visit is not on a team calendar column tied to your permissions. Ask a venue admin to edit it.',
-            },
-            { status: 403 },
-          );
-        }
-        for (const calId of new Set([scopedCalendarId, calendarId])) {
-          const access = await requireManagedCalendarAccess(
-            admin,
-            scopeVenueId,
-            staff,
-            calId,
-            'You can only edit visits on calendars assigned to your account.',
-          );
-          if (!access.ok) {
-            return NextResponse.json({ error: access.error }, { status: 403 });
-          }
-        }
-      }
-    } else if (!linkedGrantAllowsCalendar(linkedGrant, false, calendarId)) {
+    // At their own venue staff edit visits on any calendar, as an admin does (2026-09-17).
+    if (!isOwnVenue && !linkedGrantAllowsCalendar(linkedGrant, false, calendarId)) {
       return NextResponse.json({ error: 'This link does not include that calendar.' }, { status: 403 });
     }
 

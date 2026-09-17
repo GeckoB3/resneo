@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { getVenueStaff, requireManagedCalendarAccess } from '@/lib/venue-auth';
+import { getVenueStaff } from '@/lib/venue-auth';
 import { validateAppointmentModificationInterval } from '@/lib/booking/validate-appointment-modification';
 import {
   linkedGrantAllowsMutation,
@@ -79,19 +79,9 @@ export async function POST(
       return NextResponse.json({ ok: false, error: 'Not an appointment booking' }, { status: 400 });
     }
 
+    // At their own venue staff change bookings on any calendar, as an admin does (2026-09-17).
     if (staff.role !== 'admin') {
-      if (isOwnVenue) {
-        const access = await requireManagedCalendarAccess(
-          admin,
-          scopeVenueId,
-          staff,
-          parsed.data.practitioner_id,
-          'You can only validate changes on calendars assigned to your account.',
-        );
-        if (!access.ok) {
-          return NextResponse.json({ ok: false, error: access.error }, { status: 403 });
-        }
-      } else if (!linkedGrantAllowsMutation(linkedGrant, false)) {
+      if (!isOwnVenue && !linkedGrantAllowsMutation(linkedGrant, false)) {
         return NextResponse.json(
           { error: 'This link does not allow editing the other venue’s bookings.' },
           { status: 403 },

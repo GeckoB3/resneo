@@ -13,8 +13,7 @@
  * who may ask, that the time is free at the new calendar, and finds the client at the new venue.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { requireManagedCalendarAccess, type VenueStaff } from '@/lib/venue-auth';
-import { resolveBookingScopedCalendarId } from '@/lib/booking/staff-booking-calendar-scope';
+import type { VenueStaff } from '@/lib/venue-auth';
 import { loadStaffAccessibleBooking, resolveLinkedStaffCreateScope } from '@/lib/booking/staff-booking-access';
 import { findStaffCollectiveForVenue } from '@/lib/linked-accounts/collective-staff-scope';
 import { validateAppointmentModificationInterval } from '@/lib/booking/validate-appointment-modification';
@@ -226,23 +225,6 @@ export async function moveBookingToCollectiveVenue(
   // A move cancels the original, so a partner's booking needs the right to cancel it.
   if (!isOwnVenue && linkedGrant?.act !== 'create_edit_cancel') {
     return refuse(403, 'This link does not allow cancelling the other venue’s bookings, so it cannot be moved.');
-  }
-  // At its own venue, staff who are not admins move only the bookings on their own calendars, as
-  // the booking PATCH allows.
-  if (isOwnVenue && staff.role !== 'admin') {
-    const scopedCalendarId = await resolveBookingScopedCalendarId(
-      admin,
-      ownerVenueId,
-      booking as Parameters<typeof resolveBookingScopedCalendarId>[2],
-    );
-    const access = await requireManagedCalendarAccess(
-      admin,
-      ownerVenueId,
-      staff,
-      scopedCalendarId,
-      'You can only move bookings on calendars assigned to your account.',
-    );
-    if (!access.ok) return refuse(403, access.error);
   }
 
   const { data: calendar } = await admin

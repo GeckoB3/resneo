@@ -2,8 +2,7 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import { z } from 'zod';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { getVenueStaff, requireManagedCalendarAccess } from '@/lib/venue-auth';
-import { resolveBookingScopedCalendarId } from '@/lib/booking/staff-booking-calendar-scope';
+import { getVenueStaff } from '@/lib/venue-auth';
 import {
   linkedGrantAllowsCalendar,
   linkedGrantAllowsMutation,
@@ -321,39 +320,7 @@ export async function PATCH(
      * on the source would let them push one onto anybody's.
      */
     if (isOwnVenue) {
-      if (staff.role !== 'admin') {
-        const calendarsToCheck = new Set<string>();
-        for (const t of targets) {
-          const scoped = await resolveBookingScopedCalendarId(
-            admin,
-            scopeVenueId,
-            rowById.get(t.id)! as Parameters<typeof resolveBookingScopedCalendarId>[2],
-          );
-          if (!scoped) {
-            return NextResponse.json(
-              {
-                error:
-                  'This visit is not on a team calendar column tied to your permissions. Ask a venue admin to move it.',
-              },
-              { status: 403 },
-            );
-          }
-          calendarsToCheck.add(scoped);
-          if (t.calendarId) calendarsToCheck.add(t.calendarId);
-        }
-        for (const calId of calendarsToCheck) {
-          const access = await requireManagedCalendarAccess(
-            admin,
-            scopeVenueId,
-            staff,
-            calId,
-            'You can only move visits between calendars assigned to your account.',
-          );
-          if (!access.ok) {
-            return NextResponse.json({ error: access.error }, { status: 403 });
-          }
-        }
-      }
+      // Staff move visits between any of their venue's calendars, as an admin does (2026-09-17).
     } else {
       // §18 — every move TARGET must be in the link's scope, not just the
       // calendar the service sits on today. This route writes with the admin

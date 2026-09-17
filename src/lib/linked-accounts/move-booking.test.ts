@@ -13,10 +13,6 @@ vi.mock('@/lib/booking/staff-booking-access', () => ({
   loadStaffAccessibleBooking: vi.fn(),
   resolveLinkedStaffCreateScope: vi.fn(async () => ({ ok: true, venueId: 'member', linked: null })),
 }));
-vi.mock('@/lib/booking/staff-booking-calendar-scope', () => ({ resolveBookingScopedCalendarId: vi.fn(async () => 'cal-host') }));
-vi.mock('@/lib/venue-auth', () => ({
-  requireManagedCalendarAccess: vi.fn(async () => ({ ok: true, managedCalendarIds: ['cal-host'] })),
-}));
 vi.mock('@/lib/linked-accounts/collective-staff-scope', () => ({ findStaffCollectiveForVenue: vi.fn() }));
 vi.mock('@/lib/booking/validate-appointment-modification', () => ({
   validateAppointmentModificationInterval: vi.fn(async () => ({ ok: true, outsideHours: false })),
@@ -33,7 +29,6 @@ import { validateAppointmentModificationInterval } from '@/lib/booking/validate-
 import { findOrCreateGuest } from '@/lib/guests';
 import { recordCollectiveBookingAudit } from '@/lib/linked-accounts/audit';
 import { executeBookingModificationGuestNotification } from '@/lib/booking/send-booking-modification-guest-notification';
-import { requireManagedCalendarAccess } from '@/lib/venue-auth';
 import { moveBookingToCollectiveVenue, moveRefusalWords } from './move-booking';
 
 const staff = { id: 'staff-1', venue_id: 'host', email: 's@x.test', role: 'staff', db: {} } as never;
@@ -249,21 +244,10 @@ describe('moveRefusalWords', () => {
 });
 
 describe('who may move a booking at their own venue', () => {
-  it('refuses staff who do not manage the booking’s calendar, writing nothing', async () => {
-    vi.mocked(requireManagedCalendarAccess).mockResolvedValueOnce({
-      ok: false,
-      error: 'You can only move bookings on calendars assigned to your account.',
-    });
+  it('lets staff move a booking on any calendar, as an admin can', async () => {
     const recording = world();
     const result = await move(recording);
-    expect(result).toMatchObject({ ok: false, status: 403 });
-    expect(vi.mocked(requireManagedCalendarAccess)).toHaveBeenCalledWith(
-      expect.anything(),
-      'host',
-      staff,
-      'cal-host',
-      expect.any(String),
-    );
-    expect(recording.calls.some((c) => c.table === 'rpc:collective_move_booking')).toBe(false);
+    expect(result).toMatchObject({ ok: true });
+    expect(recording.calls.some((c) => c.table === 'rpc:collective_move_booking')).toBe(true);
   });
 });

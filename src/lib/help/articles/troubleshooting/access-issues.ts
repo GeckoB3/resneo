@@ -5,7 +5,7 @@ export const article: HelpArticle = {
   title: 'Login, staff access and permissions',
   description: 'Sign-in links that will not work, password resets, what a team member cannot reach, auto-logout, and billing locks.',
   tags: ['login', 'access', 'auth'],
-  verified: '2026-09-12',
+  verified: '2026-09-17',
   content: `
 # Login, staff access and permissions
 
@@ -33,7 +33,7 @@ To change it, an admin opens **Settings → Staff** and uses the shield icon on 
 
 ## A team member cannot edit a calendar
 
-Team members can look at every calendar but only change the ones assigned to them. An admin ticks the calendar under **Calendars they manage** on that person's row in **Settings → Staff**.
+Team members can work with bookings on every calendar, but can only change the hours, closures and service settings of the calendars assigned to them. An admin ticks the calendar under **Calendars they manage** on that person's row in **Settings → Staff**.
 
 ## Everyone is being logged out too often
 

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import { statusChangeCascadesAcrossVisit } from '@/lib/booking/visit-status-scope';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
-import { getVenueStaff, requireManagedCalendarAccess } from '@/lib/venue-auth';
+import { getVenueStaff } from '@/lib/venue-auth';
 import { resolveBookingServicePaymentRequirement } from '@/lib/booking/booking-service-payment-requirement';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { recordBookingWriteAudit } from '@/lib/linked-accounts/audit';
@@ -78,7 +78,6 @@ import { cancelOpenDepositIntentForBookings } from '@/lib/booking/cancel-open-de
 import { classifyDepositRefundFailure } from '@/lib/booking/deposit-refund-convergence';
 import { planSharedDepositRefund } from '@/lib/booking/shared-deposit-refund';
 import { resolveRescheduleCancellationDeadline } from '@/lib/booking/reschedule-cancellation-deadline';
-import { resolveBookingScopedCalendarId } from '@/lib/booking/staff-booking-calendar-scope';
 import { tableGroupKeyFromIds } from '@/lib/table-management/combination-rules';
 import type { BookingModel } from '@/types/booking-models';
 import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
@@ -715,32 +714,10 @@ export async function PATCH(
           { status: 403 },
         );
       }
-    } else if (staff.role !== 'admin') {
-        const scopedCalendarId = await resolveBookingScopedCalendarId(
-          admin,
-          scopeVenueId,
-          booking as Parameters<typeof resolveBookingScopedCalendarId>[2],
-        );
-        if (!scopedCalendarId) {
-          return NextResponse.json(
-            {
-              error:
-                'This booking is not linked to a team calendar column tied to your permissions. Ask a venue admin to update this booking, or contact support if that seems wrong.',
-            },
-            { status: 403 },
-          );
-        }
-        const access = await requireManagedCalendarAccess(
-          admin,
-          scopeVenueId,
-          staff,
-          scopedCalendarId,
-          'You can only modify bookings on calendars assigned to your account.',
-        );
-        if (!access.ok) {
-          return NextResponse.json({ error: access.error }, { status: 403 });
-        }
     }
+    // Staff work bookings like an admin at their own venue: any calendar, to any calendar (the
+    // owner's rule, 2026-09-17, replacing C8's limit). Calendar assignment limits hours, closures
+    // and service settings, not bookings.
 
     /** Per-booking salon processing blocks only (no reschedule). */
     const isProcessingBlocksOnlyPatch =
@@ -2567,33 +2544,9 @@ export async function PATCH(
       }
 
       if (body.practitioner_id && isAppointment) {
-        // C8 — a non-admin could move any booking onto a colleague's calendar.
-        // This is a normal gesture rather than a crafted request: the calendar
-        // fetches `?roster=1`, and practitioners/route.ts:326 narrows to managed
-        // calendars only when `roster` is ABSENT, so every column renders and
-        // drag-and-drop between them just works. The validate route already
-        // gates this same field; this route, which performs the write, did not.
-        //
-        // Placement matters. It sits inside this block so `practitioner_id` is
-        // always present: `requireManagedCalendarAccess` fails closed on a null
-        // calendar id BEFORE its admin bypass, so hoisting this to the top of
-        // the PATCH would 403 every status change, note edit and deposit edit
-        // for every role. And it is gated on `isOwnVenue` because `scopeVenueId`
-        // is the OWNER venue, where a linked venue's staff hold no calendars at
-        // all — a cross-venue mover would fail this check for the wrong reason.
-        // Their case is the §18 check immediately below.
-        if (isOwnVenue && staff.role !== 'admin') {
-          const access = await requireManagedCalendarAccess(
-            admin,
-            scopeVenueId,
-            staff,
-            body.practitioner_id as string,
-            'You can only move bookings onto calendars assigned to your account.',
-          );
-          if (!access.ok) {
-            return NextResponse.json({ error: access.error }, { status: 403 });
-          }
-        }
+        // C8's own-venue limit (staff could move only onto calendars assigned to them) was removed
+        // on 2026-09-17 by the owner's rule: staff move bookings between any of their venue's
+        // calendars, as an admin does.
         // §18 — for a cross-venue edit, the *move target* calendar must also be in
         // the link's scope (loadStaffAccessibleBooking only checked the booking's
         // current calendar). This route writes via the service-role admin client,

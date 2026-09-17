@@ -29,9 +29,6 @@ vi.mock('@/lib/booking/staff-booking-access', () => ({
   linkedGrantAllowsMutation: vi.fn(() => true),
   linkedGrantAllowsCalendar: vi.fn(() => true),
 }));
-vi.mock('@/lib/booking/staff-booking-calendar-scope', () => ({
-  resolveBookingScopedCalendarId: vi.fn(async (_a: unknown, _v: unknown, b: { calendar_id?: string }) => b.calendar_id ?? null),
-}));
 vi.mock('@/lib/booking/validate-appointment-modification', () => ({
   validateAppointmentModificationInterval: vi.fn(),
 }));

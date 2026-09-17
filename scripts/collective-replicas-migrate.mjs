@@ -45,6 +45,11 @@ if (!url || !key) {
 const projectRef = new URL(url).hostname.split('.')[0];
 const admin = createClient(url, key, { auth: { persistSession: false } });
 const log = (...m) => console.error(...m);
+/**
+ * Invariants the test plan reports without gating (Docs/collective-one-venue-test-plan.md §4): I21, a
+ * member with forms off holding a form-bearing service, which D54 allows (its calendars are hidden).
+ */
+const REPORT_ONLY_INVARIANTS = new Set(['I21']);
 
 async function rpc(fn, params) {
   const { data, error } = await admin.rpc(fn, params);
@@ -99,9 +104,12 @@ async function drain(collectiveId) {
 
 async function invariants(since, collectiveId) {
   const rows = await rpc('collective_invariant_report', { p_since: since, p_collective_id: collectiveId });
-  const bad = (rows ?? []).filter((r) => Number(r.violations) > 0);
-  for (const r of bad) log(`  ${r.invariant}: ${r.violations} (${(r.sample_ids ?? []).slice(0, 5).join(', ')})`);
-  return bad;
+  const found = (rows ?? []).filter((r) => Number(r.violations) > 0);
+  for (const r of found) {
+    const note = REPORT_ONLY_INVARIANTS.has(r.invariant) ? ' (reported, not a failure)' : '';
+    log(`  ${r.invariant}: ${r.violations}${note} (${(r.sample_ids ?? []).slice(0, 5).join(', ')})`);
+  }
+  return found.filter((r) => !REPORT_ONLY_INVARIANTS.has(r.invariant));
 }
 
 async function bookingTotals(collectiveId) {

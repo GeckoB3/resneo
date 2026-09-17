@@ -7,7 +7,7 @@
  * collective, and, for a host admin, every venue's calendars and what they offer. From that comes
  * the health strip, "What needs you" and the grid, with no second endpoint to keep in step.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { TabBar } from '@/components/ui/dashboard/TabBar';
 import { CollectiveHistoryPanel } from '@/components/linked-accounts/collective/CollectiveHistoryPanel';
@@ -26,6 +26,7 @@ import { VenueSyncPill } from '@/components/linked-accounts/collective/Collectiv
 import { CollectiveTodoStrip } from '@/components/linked-accounts/collective/CollectiveTodoStrip';
 import { CollectiveServicesGrid } from '@/components/linked-accounts/collective/CollectiveServicesGrid';
 import { buildCollectiveTodos } from '@/lib/linked-accounts/replicas/collective-todos';
+import { hiddenPillVenue } from '@/lib/linked-accounts/replicas/status';
 import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import type { CollectiveCalendarGroup } from '@/lib/linked-accounts/replicas/host-calendars';
@@ -321,6 +322,9 @@ export function CollectiveAreaClient({ currency = 'GBP' }: { currency?: string }
 
       <CollectiveTodoStrip todos={todos} onRetry={(venueId) => void retryVenue(venueId)} />
 
+      {!collective.isHost ? (
+        <MemberServicesList services={services} hostName={collective.hostVenueName} collectiveName={collective.name} />
+      ) : (
       <SectionCard elevated>
         <SectionCard.Body>
           <CollectiveServicesGrid
@@ -333,8 +337,88 @@ export function CollectiveAreaClient({ currency = 'GBP' }: { currency?: string }
           />
         </SectionCard.Body>
       </SectionCard>
+      )}
       </>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * A member's view of the services tab (live review, 2026-09-17). The grid is the host's tool: it
+ * needs every venue's calendars, which only the host reads. A member sees what is on the page for it
+ * and what is parked, and chooses its calendars on its own Services page.
+ */
+function MemberServicesList({
+  services,
+  hostName,
+  collectiveName,
+}: {
+  services: ServiceRow[];
+  hostName: string;
+  collectiveName: string;
+}) {
+  const onPage = services.filter((s) => s.collective?.role === 'replica');
+  const parked = services.filter((s) => s.collective?.role === 'parked');
+  const retired = services.filter((s) => s.collective?.role === 'retired');
+  const section = (title: string, caption: string, rows: ServiceRow[], pill: (s: ServiceRow) => ReactNode) =>
+    rows.length === 0 ? null : (
+      <section className="space-y-2">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-900">
+            {title} <span className="font-normal text-slate-500">({rows.length})</span>
+          </h3>
+          <p className="text-xs text-slate-600">{caption}</p>
+        </div>
+        <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+          {rows.map((s) => (
+            <li key={s.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
+              <span className="text-slate-900">{s.name}</span>
+              {pill(s)}
+            </li>
+          ))}
+        </ul>
+      </section>
+    );
+  return (
+    <SectionCard elevated>
+      <SectionCard.Body className="space-y-5">
+        <p className="text-sm text-slate-600">
+          Choose which of your calendars offer each service on your{' '}
+          <a href="/dashboard/appointment-services" className="font-medium text-brand-700 underline underline-offset-2">
+            Services
+          </a>{' '}
+          page.
+        </p>
+        {section(
+          collectiveCopy('svc.member.section.fromHostTitle', { host: hostName }),
+          collectiveCopy('svc.member.section.fromHostCaption', { host: hostName, collective: collectiveName }),
+          onPage,
+          (s) => {
+            const block = s.collective!;
+            const venue = block.status === 'hidden' ? hiddenPillVenue(block.hidden_reasons) : null;
+            return (
+              <VenueSyncPill
+                status={block.status}
+                reason={block.status_reason}
+                label={venue ? collectiveCopy('svc.card.hiddenAt', { venue }) : null}
+              />
+            );
+          },
+        )}
+        {section(
+          collectiveCopy('svc.member.section.parkedTitle', { collective: collectiveName }),
+          collectiveCopy('svc.member.section.parkedCaption', { collective: collectiveName, host: hostName }),
+          parked,
+          () => <span className="text-xs text-slate-500">{collectiveCopy('common.pill.parked')}</span>,
+        )}
+        {section(
+          collectiveCopy('svc.member.section.retired', { host: hostName }),
+          collectiveCopy('svc.member.section.retiredCaption', { host: hostName, collective: collectiveName }),
+          retired,
+          () => <span className="text-xs text-slate-500">{collectiveCopy('common.pill.retired')}</span>,
+        )}
+      </SectionCard.Body>
+    </SectionCard>
   );
 }

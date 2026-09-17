@@ -180,6 +180,14 @@ export const COLLECTIVE_COPY = {
     '{venue} has forms switched off, so {count} services that need a form are hidden from guests there.',
   'ov.todo.formsOffOne':
     '{venue} has forms switched off, so {count} service that needs a form is hidden from guests there.',
+  // The same two rows as a member reads them about itself (live review, 2026-09-17).
+  'ov.todo.noStripeYou': 'You cannot take card payments yet, so {count} paid services are hidden from your guests.',
+  'ov.todo.noStripeYouOne': 'You cannot take card payments yet, so {count} paid service is hidden from your guests.',
+  'ov.todo.formsOffYou':
+    'Your forms are switched off, so {count} services that need a form are hidden from your guests.',
+  'ov.todo.formsOffYouOne':
+    'Your forms are switched off, so {count} service that needs a form is hidden from your guests.',
+  'svc.card.activeParked': 'Active (bookable again if you leave {collective})',
   'svc.offer.chooseCalendars': 'Choose calendars',
   'svc.card.onPageSwitch': 'On the {collective} page',
   'svc.offer.title': 'Add {service} to the {collective} page?',

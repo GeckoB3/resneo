@@ -2356,7 +2356,13 @@ export async function DELETE(request: NextRequest) {
     if (error) {
       // A host's service on the collective page, or a member's copy of one, is refused by the
       // engine (RN002, RN001); say why rather than failing (APP-01).
-      const coded = collectiveDbError(error);
+      const context =
+        (await loadMasterSaveContext(admin, id as string, staff.venue_id)) ??
+        (await loadMemberServiceContext(admin, id as string, staff.venue_id));
+      const coded = collectiveDbError(
+        error,
+        context ? { collective: context.collectiveName, host: context.hostVenueName } : {},
+      );
       if (coded) return NextResponse.json(coded.body, { status: coded.status });
       console.error('DELETE /api/venue/appointment-services failed:', error);
       return NextResponse.json({ error: 'Failed to delete service' }, { status: 500 });

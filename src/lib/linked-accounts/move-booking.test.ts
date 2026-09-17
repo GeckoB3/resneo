@@ -132,6 +132,28 @@ describe('moveBookingToCollectiveVenue', () => {
     ]);
   });
 
+  it('moves a booking made before the switch, which still names the older, archived offering', async () => {
+    vi.mocked(loadStaffAccessibleBooking).mockResolvedValueOnce({
+      ok: true,
+      ctx: {
+        booking: { ...booking, collective_service_item_id: 'old-offer' },
+        ownerVenueId: 'host',
+        isOwnVenue: true,
+        linkedGrant: null,
+        linkId: null,
+      },
+    } as never);
+    const recording = world((call) => {
+      if (call.table !== 'collective_service_items') return undefined;
+      const byId = call.filters.find((f) => f[0] === 'eq' && f[1] === 'id');
+      if (byId?.[2] === 'old-offer') return { data: { id: 'old-offer', master_service_id: null, status: 'archived' } };
+      return undefined;
+    });
+    const result = await move(recording);
+    expect(result).toMatchObject({ ok: true, venueId: 'member' });
+    expect(vi.mocked(validateAppointmentModificationInterval).mock.calls[0]![0]).toMatchObject({ svcId: 'replica-cut' });
+  });
+
   it('says when the new venue does not send change messages', async () => {
     vi.mocked(executeBookingModificationGuestNotification).mockResolvedValueOnce({
       emailSent: false,

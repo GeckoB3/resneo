@@ -63,6 +63,11 @@ export interface MemberServiceViewProps {
   currencySymbol?: string;
   saving?: boolean;
   error?: string | null;
+  /**
+   * Set when the last save listed upcoming bookings on a calendar being unticked: the next save
+   * keeps them and goes ahead, and the button says so.
+   */
+  confirmRemoval?: boolean;
   onSave: (values: MemberServiceSave) => void;
 }
 
@@ -75,6 +80,7 @@ export function MemberServiceView({
   currencySymbol = '£',
   saving = false,
   error = null,
+  confirmRemoval = false,
   onSave,
 }: MemberServiceViewProps) {
   const savedCalendarIds = useMemo(
@@ -112,7 +118,7 @@ export function MemberServiceView({
                 online_meeting_info: meetingInfo,
                 pre_appointment_instructions: instructions,
               })} loading={saving} disabled={!changed || saving}>
-            Save your settings
+            {confirmRemoval ? 'Remove and keep bookings' : 'Save your settings'}
           </Button>
           <Button type="button" variant="secondary" onClick={onClose} disabled={saving}>
             Close
@@ -122,7 +128,12 @@ export function MemberServiceView({
     >
       <div className="space-y-5">
         {error ? (
-          <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+          <p
+            role="alert"
+            className={`rounded-lg border px-3 py-2 text-sm ${
+              confirmRemoval ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-rose-200 bg-rose-50 text-rose-800'
+            }`}
+          >
             {error}
           </p>
         ) : null}

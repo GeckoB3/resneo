@@ -52,4 +52,25 @@ describe('MemberServiceView', () => {
       expect.objectContaining({ practitioner_ids: ['cal-1'], pre_appointment_instructions: 'Use the side door' }),
     );
   });
+
+  it('after listing the bookings on an unticked calendar, the next save keeps them and says so', async () => {
+    const onSave = vi.fn();
+    render(
+      <MemberServiceView
+        open
+        onClose={vi.fn()}
+        service={{ name: 'Cut', location_type: 'business_venue', pre_appointment_instructions: null }}
+        block={block}
+        calendars={[{ id: 'cal-1', name: 'Chair 1', offers: true }]}
+        error="2 upcoming bookings are already booked for Cut on Chair 1."
+        confirmRemoval
+        onSave={onSave}
+      />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('checkbox', { name: 'Chair 1' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('2 upcoming bookings');
+    await user.click(screen.getByRole('button', { name: 'Remove and keep bookings' }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ practitioner_ids: [] }));
+  });
 });

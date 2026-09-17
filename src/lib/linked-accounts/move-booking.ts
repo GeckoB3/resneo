@@ -158,8 +158,17 @@ async function targetServiceFor(
   if (model?.service_model !== 'replicas') {
     return legacyTargetServiceFor(admin, booking, collective.collectiveId, targetVenueId, calendarId);
   }
-  let itemId = (booking.collective_service_item_id as string | null) ?? null;
-  if (!itemId) {
+  // The offering the booking names, when it is still on the page. A booking made before the
+  // collective moved to shared services names the older model's offering, now archived, so the
+  // booked service's own link (or, at the host, its master) decides instead.
+  const itemColumns = 'id, master_service_id, status';
+  const namedId = (booking.collective_service_item_id as string | null) ?? null;
+  let item: Row | null = null;
+  if (namedId) {
+    const { data } = await admin.from('collective_service_items').select(itemColumns).eq('id', namedId).maybeSingle();
+    item = data && data.status === 'active' ? (data as Row) : null;
+  }
+  if (!item) {
     const { data: replica } = await admin
       .from('collective_service_replicas')
       .select('collective_service_item_id')
@@ -168,16 +177,21 @@ async function targetServiceFor(
       .eq('replica_service_id', serviceId)
       .is('released_at', null)
       .maybeSingle();
-    itemId = (replica?.collective_service_item_id as string | undefined) ?? null;
+    const { data } = replica?.collective_service_item_id
+      ? await admin
+          .from('collective_service_items')
+          .select(itemColumns)
+          .eq('id', replica.collective_service_item_id as string)
+          .maybeSingle()
+      : await admin
+          .from('collective_service_items')
+          .select(itemColumns)
+          .eq('collective_id', collective.collectiveId)
+          .eq('master_service_id', serviceId)
+          .eq('status', 'active')
+          .maybeSingle();
+    item = data ? (data as Row) : null;
   }
-  const { data: item } = itemId
-    ? await admin.from('collective_service_items').select('id, master_service_id, status').eq('id', itemId).maybeSingle()
-    : await admin
-        .from('collective_service_items')
-        .select('id, master_service_id, status')
-        .eq('collective_id', collective.collectiveId)
-        .eq('master_service_id', serviceId)
-        .maybeSingle();
   if (!item || item.status !== 'active') return null;
 
   let targetServiceId: string | null = null;

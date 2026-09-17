@@ -128,7 +128,8 @@ function memberTodos(input: CollectiveTodoInput, onPage: CollectiveTodoService[]
     }
   }
 
-  todos.push(...hiddenReasonTodos(onPage, { onlyVenueId: input.ownVenueId ?? null, withActions: true }));
+  // A member's copies only ever carry its own reasons, so the rows speak to it directly.
+  todos.push(...hiddenReasonTodos(onPage, { onlyVenueId: input.ownVenueId ?? null, withActions: true, self: true }));
   return todos;
 }
 
@@ -138,7 +139,7 @@ function memberTodos(input: CollectiveTodoInput, onPage: CollectiveTodoService[]
  */
 function hiddenReasonTodos(
   services: CollectiveTodoService[],
-  options: { onlyVenueId?: string | null; withActions: boolean },
+  options: { onlyVenueId?: string | null; withActions: boolean; self?: boolean },
 ): CollectiveTodo[] {
   const onlyVenueId = options.onlyVenueId ?? null;
   const payments = new Map<string, { name: string; count: number }>();
@@ -157,7 +158,7 @@ function hiddenReasonTodos(
   for (const [venueId, venue] of payments) {
     todos.push({
       id: `payments-${venueId}`,
-      text: counted('ov.todo.noStripe', venue.count, { venue: venue.name }),
+      text: counted(options.self ? 'ov.todo.noStripeYou' : 'ov.todo.noStripe', venue.count, { venue: venue.name }),
       ...(options.withActions
         ? { action: { kind: 'payments' as const, label: collectiveCopy('svc.member.card.connectStripe') } }
         : {}),
@@ -166,7 +167,7 @@ function hiddenReasonTodos(
   for (const [venueId, venue] of forms) {
     todos.push({
       id: `forms-${venueId}`,
-      text: counted('ov.todo.formsOff', venue.count, { venue: venue.name }),
+      text: counted(options.self ? 'ov.todo.formsOffYou' : 'ov.todo.formsOff', venue.count, { venue: venue.name }),
       ...(options.withActions
         ? { action: { kind: 'forms' as const, label: collectiveCopy('svc.member.card.turnOn') } }
         : {}),

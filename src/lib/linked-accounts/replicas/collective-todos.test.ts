@@ -173,7 +173,7 @@ describe('a member', () => {
       ownCalendarCount: () => 1,
       ownVenueId: 'member',
     });
-    expect(todos[0]!.text).toContain('has forms switched off');
+    expect(todos[0]!.text).toBe('Your forms are switched off, so 1 service that needs a form is hidden from your guests.');
     expect(todos[0]!.action).toEqual({ kind: 'forms', label: 'Turn on' });
   });
 });

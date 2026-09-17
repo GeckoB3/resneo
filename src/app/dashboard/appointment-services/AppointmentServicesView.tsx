@@ -208,7 +208,13 @@ function CollectiveServicePills({ block }: { block: CollectiveServiceBlock }) {
  * The one line a member reads under a service its host manages (UX spec §2 item 3). First match
  * wins, because a service that is still setting up has nothing useful to say about Stripe yet.
  */
-function MemberServiceLine({ block }: { block: CollectiveServiceBlock }) {
+function MemberServiceLine({
+  block,
+  paymentRequirement,
+}: {
+  block: CollectiveServiceBlock;
+  paymentRequirement: string | null;
+}) {
   const host = block.host_venue_name;
   if (block.status === 'setting_up') {
     return <p className="text-xs text-slate-600">{collectiveCopy('svc.member.card.settingUp')}</p>;
@@ -223,7 +229,16 @@ function MemberServiceLine({ block }: { block: CollectiveServiceBlock }) {
   if (hidden?.reason === 'payments') {
     return (
       <p className="text-xs text-amber-800">
-        {collectiveCopy('svc.member.card.noStripe', { paymentKind: 'a payment' })}{' '}
+        {collectiveCopy('svc.member.card.noStripe', {
+          paymentKind:
+            paymentRequirement === 'card_hold'
+              ? 'a card hold'
+              : paymentRequirement === 'full_payment'
+                ? 'payment in full'
+                : paymentRequirement === 'deposit'
+                  ? 'a deposit'
+                  : 'a payment',
+        })}{' '}
         <Link href="/dashboard/settings?tab=payments" className="font-medium text-brand-700 underline underline-offset-2">
           {collectiveCopy('svc.member.card.connectStripe')}
         </Link>
@@ -367,6 +382,8 @@ export function AppointmentServicesView({
   /** A service the host manages, opened to look at and to choose this venue's calendars (W6). */
   const [viewingService, setViewingService] = useState<Service | null>(null);
   const [viewingError, setViewingError] = useState<string | null>(null);
+  /** The member view listed bookings on a calendar being unticked; the next save keeps them. */
+  const [viewingNeedsAck, setViewingNeedsAck] = useState(false);
   /** The host flipping a service's "On the page" switch: asked first, then offered or withdrawn. */
   const [offerAsk, setOfferAsk] = useState<{ svc: Service; offer: boolean } | null>(null);
   const [offerBusy, setOfferBusy] = useState<Set<string>>(() => new Set());
@@ -1569,6 +1586,7 @@ export function AppointmentServicesView({
                 if (!svc) return;
                 if (isManagedByHost(svc)) {
                   setViewingError(null);
+                  setViewingNeedsAck(false);
                   setViewingService(svc);
                   return;
                 }
@@ -1762,7 +1780,9 @@ export function AppointmentServicesView({
                         </Pill>
                       ) : null}
                       {svc.collective ? <CollectiveServicePills block={svc.collective} /> : null}
-                      {isManagedByHost(svc) ? <MemberServiceLine block={svc.collective!} /> : null}
+                      {isManagedByHost(svc) ? (
+                        <MemberServiceLine block={svc.collective!} paymentRequirement={svc.payment_requirement ?? null} />
+                      ) : null}
                     </div>
                   }
                 />
@@ -2028,7 +2048,9 @@ export function AppointmentServicesView({
                               />
                             </button>
                             <label htmlFor={switchId} className="cursor-pointer select-none text-xs text-slate-600">
-                              Active (visible to guests)
+                              {svc.collective?.role === 'parked'
+                                ? collectiveCopy('svc.card.activeParked', { collective: svc.collective.collective_name })
+                                : 'Active (visible to guests)'}
                             </label>
                           </span>
                         );
@@ -2049,6 +2071,7 @@ export function AppointmentServicesView({
                         onEdit={() => {
                           if (isManagedByHost(svc)) {
                             setViewingError(null);
+                            setViewingNeedsAck(false);
                             setViewingService(svc);
                             return;
                           }
@@ -2403,7 +2426,10 @@ export function AppointmentServicesView({
       {viewingService && viewingService.collective ? (
         <MemberServiceView
           open
-          onClose={() => setViewingService(null)}
+          onClose={() => {
+            setViewingNeedsAck(false);
+            setViewingService(null);
+          }}
           service={{
             ...viewingService,
             compliance_type_names: complianceTypeNamesByService.get(viewingService.id) ?? [],
@@ -2415,8 +2441,8 @@ export function AppointmentServicesView({
           currencySymbol={sym}
           saving={saving}
           error={viewingError}
-          calendars={practitioners
-            .filter((p) => p.is_active !== false)
+          confirmRemoval={viewingNeedsAck}
+          calendars={allocatableCalendars
             .map((p) => ({
               id: p.id,
               name: p.name,
@@ -2425,11 +2451,16 @@ export function AppointmentServicesView({
             }))}
           onSave={(values) => {
             const service = viewingService;
+            const acknowledge = viewingNeedsAck;
             void (async () => {
               setSaving(true);
               setViewingError(null);
               try {
-                const res = await fetch('/api/venue/appointment-services', {
+                const res = await fetch(
+                  acknowledge
+                    ? '/api/venue/appointment-services?acknowledge_affected_bookings=true'
+                    : '/api/venue/appointment-services',
+                  {
                   method: 'PATCH',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
@@ -2450,12 +2481,28 @@ export function AppointmentServicesView({
                       ? { pre_appointment_instructions: values.pre_appointment_instructions ?? '' }
                       : {}),
                   }),
-                });
+                  },
+                );
                 if (!res.ok) {
-                  const data = (await res.json().catch(() => ({}))) as { error?: string };
+                  const data = (await res.json().catch(() => ({}))) as {
+                    error?: string;
+                    message?: string;
+                    requires_confirmation?: boolean;
+                  };
+                  if (res.status === 409 && data.requires_confirmation) {
+                    setViewingNeedsAck(true);
+                    setViewingError(
+                      data.message ??
+                        data.error ??
+                        'Some upcoming bookings are already booked for this service on this calendar. They are kept.',
+                    );
+                    return;
+                  }
+                  setViewingNeedsAck(false);
                   setViewingError(data.error ?? 'Could not save your settings. Please try again.');
                   return;
                 }
+                setViewingNeedsAck(false);
                 setViewingService(null);
                 await fetchAll();
               } catch {

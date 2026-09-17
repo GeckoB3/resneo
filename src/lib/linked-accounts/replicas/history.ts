@@ -121,7 +121,7 @@ export function historySentence(row: HistoryRow, names: HistoryNames): string {
   const actor = actorWords(row, names);
   const service = names.service(row.service_id);
   const venue = row.target_venue_name ?? 'a venue';
-  const calendar = names.calendar(row.calendar_id);
+  const calendar = names.calendar(eventCalendarId(row));
   const collective = row.collective_name;
   switch (row.event_type) {
     case 'offering_added':
@@ -302,10 +302,26 @@ export async function loadHistory(
   };
 }
 
+/**
+ * The calendar an event is about. The engine's calendar writes leave the row's own `calendar_id`
+ * empty and keep the calendar in `changes` (the assignment row under `after` or `before`, or
+ * `calendar_id` for a values change), so the sentence reads it from there.
+ */
+export function eventCalendarId(row: Pick<HistoryRow, 'calendar_id' | 'changes'>): string | null {
+  if (row.calendar_id) return row.calendar_id;
+  const changes = (row.changes ?? {}) as {
+    calendar_id?: unknown;
+    after?: { calendar_id?: unknown } | null;
+    before?: { calendar_id?: unknown } | null;
+  };
+  const id = changes.calendar_id ?? changes.after?.calendar_id ?? changes.before?.calendar_id;
+  return typeof id === 'string' && id ? id : null;
+}
+
 /** The service, calendar and person names a page of rows needs, in three reads, not one per row. */
 async function loadHistoryNames(admin: SupabaseClient, rows: HistoryRow[]): Promise<HistoryNames> {
   const serviceIds = [...new Set(rows.map((r) => r.service_id).filter((id): id is string => Boolean(id)))];
-  const calendarIds = [...new Set(rows.map((r) => r.calendar_id).filter((id): id is string => Boolean(id)))];
+  const calendarIds = [...new Set(rows.map(eventCalendarId).filter((id): id is string => Boolean(id)))];
   const userIds = [...new Set(rows.map((r) => r.actor_user_id).filter((id): id is string => Boolean(id)))];
   const [services, calendars, staff] = await Promise.all([
     serviceIds.length > 0

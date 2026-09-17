@@ -193,6 +193,16 @@ describe('the bulk lane', () => {
     expect(onCommit).not.toHaveBeenCalled();
   });
 
+  it('cancels out putting a service on the page and then taking it off', async () => {
+    const { onCommit } = show();
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Select Massage' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Put on the page' }));
+    expect(screen.getByRole('button', { name: /Save 1 change/ })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Take off the page' }));
+    expect(screen.queryByRole('button', { name: /Save/ })).not.toBeInTheDocument();
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
   it('sends 200 at a time', async () => {
     const many: GridService[] = Array.from({ length: 150 }, (_, i) => ({
       id: `svc-${i}`,

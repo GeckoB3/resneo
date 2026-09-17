@@ -54,7 +54,10 @@ type Staged = BulkOp & { key: string };
 const keyOf = (op: BulkOp): string =>
   op.op === 'assign' || op.op === 'unassign'
     ? `calendar:${op.service_id}:${op.venue_id}:${op.calendar_id}`
-    : `${op.op}:${op.service_id}`;
+    : op.op === 'offer' || op.op === 'withdraw'
+      ? // One key for both, so taking a service off after putting it on cancels out.
+        `page:${op.service_id}`
+      : `${op.op}:${op.service_id}:${op.venue_id ?? ''}`;
 
 /** How much of a venue offers a service: all its calendars, some, or none. */
 export function cellState(group: CollectiveCalendarGroup, itemId: string | null): 'all' | 'some' | 'none' {

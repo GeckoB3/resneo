@@ -75,6 +75,25 @@ describe('historySentence', () => {
     ).toBe('Sam at Host Venue added Chair 2 at Zen Studio to Facial');
   });
 
+  it("names the calendar the engine keeps in the event's changes", () => {
+    expect(
+      historySentence(
+        row({
+          event_type: 'calendar_unassigned',
+          target_venue_name: 'Zen Studio',
+          changes: { before: { calendar_id: 'cal-1' }, affected_bookings: 0 },
+        }),
+        names,
+      ),
+    ).toBe('Sam at Host Venue took Chair 2 at Zen Studio off Facial');
+    expect(
+      historySentence(
+        row({ event_type: 'values_changed', changes: { calendar_id: 'cal-1', before: {}, after: {} } }),
+        names,
+      ),
+    ).toBe("Sam at Host Venue changed Chair 2's values for Facial");
+  });
+
   it('reads the membership events', () => {
     expect(historySentence(row({ event_type: 'member_joined', target_venue_name: 'Zen Studio' }), names)).toBe(
       'Zen Studio joined',

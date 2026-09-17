@@ -161,6 +161,8 @@ describe('runImportExecuteBatch — staged_bookings honours resolved_* ids (unif
             return { data: `guest-${insertedGuests.length}`, error: null };
           },
           // Atomic booking-insert: record the payload, return a synthetic id.
+          // Not in a collective: nothing is parked.
+          collective_bookable_service_ids: () => ({ data: null, error: null }),
           import_insert_booking_with_audit: (args) => {
             insertedBookings.push(args.p_booking as Record<string, unknown>);
             return { data: `booking-${insertedBookings.length}`, error: null };

@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Importing your data",
   description: "Bring your clients and bookings over from a spreadsheet in a few guided steps, with a 24-hour undo if anything looks off.",
   tags: ["import","data","csv","excel","migration","clients","bookings","undo"],
-  verified: '2026-09-12',
+  verified: '2026-09-17',
   content: `# Importing your data
 
 Bring your client list and booking history across from your old system. ResNeo matches your columns for you, checks the file, and gives you 24 hours to undo the whole thing.
@@ -140,6 +140,7 @@ Click **Undo**, confirm "Undo this import? This will revert created records.", a
 | Dates are a month out | The file was read as US dates | Undo, re-import, and choose **DD/MM/YYYY (UK)** |
 | **Undo** does nothing | The 24 hours have passed | Remove the records by hand |
 | Removing a session did not remove the data | **Delete** only clears the session and its files | Use **Undo** on a completed import instead |
+| **Rows imported with a note** says a service is parked | Your venue is part of a [venue collective](/help/getting-started/venue-collectives) and that service is not on the collective page | Nothing to fix: the bookings are kept and work as usual. The service cannot take new bookings until it is on the page or your venue leaves the collective |
 
 ## Next steps
 

@@ -387,6 +387,7 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
     if (t === 'booking_defaults_missing') return 'Venue setup needed before bookings can import';
     if (t === 'no_contact_details') return 'Rows with no way to identify the client';
     if (t === 'skipped_at_execute') return 'Rows skipped during import';
+    if (t === 'imported_with_note') return 'Rows imported with a note';
     if (t === 'missing_required') return 'Rows missing required information';
     if (t === 'email_invalid') return 'Email addresses that look wrong';
     if (t === 'duplicate_email') return 'Duplicate email addresses in your file';

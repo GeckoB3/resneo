@@ -34,7 +34,9 @@ import {
   findGuestIdByExactName,
   phoneForMatching,
 } from '@/lib/import/guest-lookup';
-import { recordExecuteSkip } from '@/lib/import/execute-skip-audit';
+import { parkedImportNote, recordExecuteNote, recordExecuteSkip } from '@/lib/import/execute-skip-audit';
+import { loadBookableServiceIds } from '@/lib/linked-accounts/replicas/parking';
+import { formatIsoDateInTimeZone } from '@/lib/date/format-iso-date-in-timezone';
 import { defaultPhoneCountryFromCurrency } from '@/lib/phone/e164';
 import { resolveNamedRowId } from '@/lib/import/name-match';
 import { resolveBookingImportDefaults } from '@/lib/import/booking-import-defaults';
@@ -338,6 +340,19 @@ export async function runImportExecuteBatch(
   const defaultPhoneCountry = defaultPhoneCountryFromCurrency(
     (venueRow as { currency?: string | null } | null)?.currency,
   );
+
+  // Imported bookings on parked services are kept (20270218240000); future ones get a note.
+  const bookableServiceIds = await loadBookableServiceIds(admin, venueId);
+  const importTodayYmd = formatIsoDateInTimeZone(new Date(), venueTimeZone);
+  const noteParked = async (fileId: string, rowNumber: number, serviceItemId: unknown, bookingDateYmd: string) => {
+    const note = parkedImportNote(
+      bookableServiceIds,
+      typeof serviceItemId === 'string' ? serviceItemId : null,
+      bookingDateYmd,
+      importTodayYmd,
+    );
+    if (note) await recordExecuteNote(admin, sessionId, { fileId, rowNumber, ...note });
+  };
 
   const venueMode = await resolveVenueMode(admin, venueId);
   const bookingModel = venueMode.bookingModel;
@@ -1279,6 +1294,7 @@ export async function runImportExecuteBatch(
         continue;
       }
       const booking = { id: bookingId as string };
+      await noteParked(row.file_id, row.row_number, insert.service_item_id, row.booking_date);
 
       if (sendImportReminders && !insert.suppress_import_comms) {
         try {
@@ -1709,6 +1725,7 @@ export async function runImportExecuteBatch(
         continue;
       }
       const booking = { id: bookingId as string };
+      await noteParked(f.id, rowNum, insert.service_item_id, dateIso);
 
       if (sendImportReminders && !insert.suppress_import_comms) {
         try {

@@ -16,6 +16,45 @@ export interface ExecuteSkipReason {
  * Failures here are logged but do not throw — we never want the audit recorder
  * to break the import itself.
  */
+/**
+ * A row that WAS imported but needs the venue's attention (issue type `imported_with_note`), for
+ * example a future booking on a service that is parked while the venue is in a collective.
+ */
+export async function recordExecuteNote(
+  admin: SupabaseClient,
+  sessionId: string,
+  note: ExecuteSkipReason,
+): Promise<void> {
+  const { error } = await admin.from('import_validation_issues').insert({
+    session_id: sessionId,
+    file_id: note.fileId,
+    row_number: note.rowNumber,
+    severity: 'warning',
+    issue_type: 'imported_with_note',
+    column_name: note.code,
+    raw_value: '',
+    message: note.message,
+  });
+  if (error) {
+    console.error('[execute-skip-audit] failed to record note', { code: note.code, sessionId, error: error.message });
+  }
+}
+
+/** The note for a future imported booking on a parked service, or null. */
+export function parkedImportNote(
+  bookable: Set<string> | null,
+  serviceItemId: string | null | undefined,
+  bookingDateYmd: string,
+  todayYmd: string,
+): { code: string; message: string } | null {
+  if (!bookable || !serviceItemId || bookable.has(serviceItemId) || bookingDateYmd < todayYmd) return null;
+  return {
+    code: 'parked_service',
+    message:
+      'Imported, but this service is parked while your venue is part of a collective, so it cannot take new bookings. This booking is kept and can be managed as usual.',
+  };
+}
+
 export async function recordExecuteSkip(
   admin: SupabaseClient,
   sessionId: string,

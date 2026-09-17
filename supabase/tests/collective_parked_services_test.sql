@@ -7,6 +7,7 @@
 --     collective's services book normally;
 --   * an existing booking on a parked service stays manageable: its status and time can change;
 --     moving a booking onto a parked service is refused;
+--   * an import keeps a booking on a parked service, and leaves no bypass behind (20270218240000);
 --   * a withdrawn offering's master is parked at the host;
 --   * a booking on an event session is never parked, even when its session names a parked service
 --     (20270217130000);
@@ -20,7 +21,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 
-SELECT plan(14);
+SELECT plan(17);
 
 INSERT INTO public.venues (id, name, slug, email, pricing_tier, plan_status, booking_model)
 VALUES
@@ -92,6 +93,22 @@ SELECT throws_ok(pg_temp.book('00000000-0000-0000-0000-0000009a0f01', '00000000-
   'RN007', NULL, 'A new booking for a host service not on the page is refused');
 SELECT throws_ok(pg_temp.book('00000000-0000-0000-0000-0000009a0f02', '00000000-0000-0000-0000-0000009a0a02', '00000000-0000-0000-0000-0000009a0d02', '00000000-0000-0000-0000-0000009a0503'),
   'RN007', NULL, 'A new booking for the member''s own service is refused');
+
+-- An import keeps bookings already made elsewhere, parked service or not (20270218240000).
+INSERT INTO public.staff (id, venue_id, email, name, role)
+VALUES ('00000000-0000-0000-0000-0000009a0501', '00000000-0000-0000-0000-0000009a0f02', 'admin@park.test', 'Park Admin', 'admin');
+INSERT INTO public.import_sessions (id, venue_id, created_by)
+VALUES ('00000000-0000-0000-0000-0000009a0d51', '00000000-0000-0000-0000-0000009a0f02', '00000000-0000-0000-0000-0000009a0501');
+SELECT lives_ok(
+  $$ SELECT public.import_insert_booking_with_audit('00000000-0000-0000-0000-0000009a0d51', '00000000-0000-0000-0000-0000009a0f02',
+       jsonb_build_object('venue_id', '00000000-0000-0000-0000-0000009a0f02', 'guest_id', '00000000-0000-0000-0000-0000009a0a02',
+         'calendar_id', '00000000-0000-0000-0000-0000009a0d02', 'service_item_id', '00000000-0000-0000-0000-0000009a0503',
+         'booking_date', '2031-03-06', 'booking_time', '10:00', 'booking_end_time', '10:30', 'party_size', 1,
+         'status', 'Booked', 'source', 'phone', 'booking_model', 'unified_scheduling')) $$,
+  'An imported booking on a parked service is kept');
+SELECT is(current_setting('resneo.import_insert', true), '', 'The import leaves nothing switched on behind it');
+SELECT throws_ok(pg_temp.book('00000000-0000-0000-0000-0000009a0f02', '00000000-0000-0000-0000-0000009a0a02', '00000000-0000-0000-0000-0000009a0d02', '00000000-0000-0000-0000-0000009a0503'),
+  'RN007', NULL, 'and a new booking on it after the import is still refused');
 
 INSERT INTO public.event_sessions (id, calendar_id, venue_id, session_date, start_time, end_time, service_item_id)
 VALUES ('00000000-0000-0000-0000-0000009a0c51', '00000000-0000-0000-0000-0000009a0d01', '00000000-0000-0000-0000-0000009a0f01',

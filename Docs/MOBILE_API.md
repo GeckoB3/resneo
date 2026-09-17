@@ -547,3 +547,9 @@ host when a service on the page is edited from a client without the header (N27)
    calendar through `POST /api/venue/bookings/{id}/move-venue { calendar_id, booking_date,
    booking_time }` (200 `{ booking_id, venue_id, venue_name, guest_notified }`, or 409 with the
    reason). The app's drag onto a partner column can use it instead of refusing.
+
+**Status, 2026-09-17:** items 1 to 4 and 7 are done in Resneo-app `main` (see its
+`Docs/R37_COLLECTIVES_SHARED_SERVICES.md`), together with the web's staff rule of the same day
+(staff move bookings between any calendars at their venue), the 409 `COLLECTIVE_SERVICE_UPDATING`
+and `COLLECTIVE_SERVICE_PARKED` refreshes, and calendar settings that follow the venue's booking
+models. Items 5 and 6 wait for the web to retire the older model.

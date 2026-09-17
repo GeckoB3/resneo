@@ -9,6 +9,74 @@ import type { SupportCollectiveDetail, SupportCollectiveRow } from '@/lib/platfo
 const when = (iso: string | null) =>
   iso ? new Date(iso).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Europe/London' }) : '';
 
+type NewModel = 'legacy_copies' | 'replicas';
+
+/** D37: which model a new collective starts on. Existing collectives move only by the migration script. */
+function NewCollectiveModelSetting() {
+  const [value, setValue] = useState<NewModel | null>(null);
+  const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch('/api/platform/collectives/settings', { credentials: 'same-origin' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { new_collective_service_model?: NewModel } | null) => {
+        if (!cancelled) setValue(data?.new_collective_service_model ?? null);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const save = useCallback(async (next: NewModel) => {
+    setState('saving');
+    const res = await fetch('/api/platform/collectives/settings', {
+      method: 'PATCH',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ new_collective_service_model: next }),
+    }).catch(() => null);
+    if (res?.ok) {
+      setValue(next);
+      setState('saved');
+    } else {
+      setState('error');
+    }
+  }, []);
+
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white p-4" aria-labelledby="new-collective-model">
+      <h2 id="new-collective-model" className="text-sm font-semibold text-slate-900">
+        New collectives start on
+      </h2>
+      <p className="mt-1 text-xs text-slate-600">
+        Applies only to collectives created from now on, and is recorded in the audit log. Existing collectives
+        move to shared services only through the migration script.
+      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <select
+          aria-labelledby="new-collective-model"
+          className="rounded border border-slate-300 px-2 py-1 text-sm"
+          value={value ?? ''}
+          disabled={value === null || state === 'saving'}
+          onChange={(e) => void save(e.target.value as NewModel)}
+        >
+          {value === null ? <option value="">Loading...</option> : null}
+          <option value="legacy_copies">Service copies (older model)</option>
+          <option value="replicas">Shared services</option>
+        </select>
+        {state === 'saved' ? <span className="text-xs text-emerald-700">Saved.</span> : null}
+        {state === 'error' ? (
+          <span role="alert" className="text-xs text-rose-700">
+            Could not save. Try again.
+          </span>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 export function CollectivesPageClient() {
   const [rows, setRows] = useState<SupportCollectiveRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -40,6 +108,7 @@ export function CollectivesPageClient() {
           Each collective, its model and how up to date its venues are. Read-only, apart from retrying a replica link.
         </p>
       </header>
+      <NewCollectiveModelSetting />
       {error ? (
         <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
           {error}

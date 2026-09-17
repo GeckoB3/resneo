@@ -190,6 +190,17 @@ async function main() {
     }
   }
 
+  // -- platform_settings (D37, 20270218230000) --------------------------------
+  // Service role only: it decides which model every new collective starts on.
+  for (const role of ['anon', 'authenticated']) {
+    const row = grant('platform_settings', role);
+    check(
+      `platform_settings: ${role} holds nothing`,
+      row === null,
+      `live: ${fmt(row)}. Apply supabase/migrations/20270218230000_platform_settings.sql`,
+    );
+  }
+
   // -- Service catalogue and collective tables (W15, 20270214120000) ----------
   // anon may keep SELECT (RLS returns nothing without a policy) but no write privilege. Hosted
   // defaults grant client roles on every new table, so a table created after the migration

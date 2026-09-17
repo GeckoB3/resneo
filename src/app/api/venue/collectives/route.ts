@@ -1,3 +1,4 @@
+import { newCollectiveServiceModel } from '@/lib/platform/platform-settings';
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveLinkAdmin } from '@/lib/linked-accounts/route-helpers';
 import { createCollectiveSchema } from '@/lib/linked-accounts/validation';
@@ -183,6 +184,8 @@ export async function POST(request: NextRequest) {
         status: 'active',
         page_mode: 'unified_catalog',
         timezone: eligibility.timezone,
+        // D37: the platform console decides which model a new collective starts on.
+        service_model: await newCollectiveServiceModel(ctx.admin),
       })
       .select('id')
       .single();

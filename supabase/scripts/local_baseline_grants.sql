@@ -61,7 +61,8 @@ BEGIN
          'collective_catalogue_revisions',
          'collective_audit_events',
          'collective_operations',
-         'collective_notice_marks'
+         'collective_notice_marks',
+         'platform_settings'
        )
   LOOP
     EXECUTE format(

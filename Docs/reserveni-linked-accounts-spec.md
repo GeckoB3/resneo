@@ -759,10 +759,12 @@ copies) model. `venue_collectives.service_model` says which model a collective r
 | `replicas` | Shared services, the design going forward (`Docs/collective-one-venue-plan.md`, `Docs/collective-one-venue-ux-spec.md`; migrations `20270215120000` to `20270218220000`). |
 
 Existing collectives stay on `legacy_copies` until each one is migrated by the script, one
-collective at a time, after a signed dry run (D21, D54). New collectives are also still
-created with the column default: the create route (`POST /api/venue/collectives`) does not set
-the column, and the planned switch that makes new collectives start on shared services (plan
-§8.2, the "Flag" pass, D37) has not been made.
+collective at a time, after a signed dry run (D21, D54). New collectives start on the model
+the platform console names (D37, built 2026-09-17): `platform_settings.new_collective_service_model`
+(migration `20270218230000`), changed under **Collectives** on the console and audited as
+`collectives.new_service_model`, read by `POST /api/venue/collectives`. It ships as
+`legacy_copies`, and a read failure also gives `legacy_copies`; switching it to `replicas` is the
+plan's §8.2 "Flag" step and the owner's call.
 
 On shared services the collective is one business with one menu:
 
@@ -1911,7 +1913,7 @@ spec.
 | Combined page group bookings | Not specified | Single bookings only: the group pipeline (`create-group`) has no collective routing, so the group option is hidden on a collective page until that ships. **Superseded (checked 2026-09-17):** `create-group` now resolves a collective, and a group must land at one venue (D28); a party spread across venues is refused, and the page says so before the details step. |
 | `allow_any_practitioner` column | §7.6 flag on `venue_collectives` | **Dropped 2026-07-26** (migration `20270101122000`) — it was never wired; the combined page follows the HOST venue's own flag, and per-offering pooling uses `collective_service_items.allow_any_available`. §4.3/§7.3/§7.4/§7.6 reconciled to this 2026-08-05. **Caveat, not yet addressed:** because the switch is the host's *own venue* setting rather than a collective setting, a host turning "Any available practitioner" off for its own booking page silently removes the option from the shared collective page too, for every member, with nothing in the UI signalling the coupling. Harmless until someone reports "Any available vanished from our combined page", at which point this is the cause. Fixing it properly needs a product decision on who should own the switch (host alone, or a collective-level setting), so it is recorded rather than patched. **Decided 2026-09-14 (D32): the host owns it**, so the coupling is intended; §7.6. |
 | Service model | One model: each venue's own services, linked by offerings and providers (§7.7.2, §7.7.3) | **Two models (2026-09-17).** `venue_collectives.service_model` is `legacy_copies`, `migrating` or `replicas` (§7.1). Existing collectives stay on the legacy model until `scripts/collective-replicas-migrate.mjs` moves each one (D54: the host's values apply to every service on the page, and every existing booking keeps its calendar, service, price snapshot, terms and manage links). The migration sends nothing to the venues. |
-| New collectives on shared services | New collectives start on shared services once the switch is made (plan §8.2, D37) | **Not yet (2026-09-17).** `POST /api/venue/collectives` does not set `service_model`, so a new collective starts on the column default, `legacy_copies`. |
+| New collectives on shared services | New collectives start on shared services once the switch is made (plan §8.2, D37) | **Switch built 2026-09-17, still off.** `POST /api/venue/collectives` takes `service_model` from the console setting (`platform_settings`, D37), which ships as `legacy_copies`. |
 | Members' own booking pages | Unchanged while in a collective (§7.1, original text) | **Shared services (2026-09-17):** every venue's own appointment links hand over to the collective page while it is live and the venue has a listed calendar (D3, §7.1). Legacy model: the stored `solo_page_behavior` choice still applies. |
 | Guest sign-in on the collective page | The host's setting only (D32) | **Built 2026-09-17** for shared services: the page and the three create routes use the host's setting (`replicas/collective-sign-in.ts`). The older model keeps any-member on the page and the owning venue at booking. |
 | "Came from {host}" label after release | A released service carries "Came from {host}" for 30 days when the member kept a same-named original (D52) | **Not built (2026-09-17).** The string `svc.member.card.cameFrom` exists in `collective-copy.ts` and nothing renders it. |

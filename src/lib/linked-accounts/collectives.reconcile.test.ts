@@ -270,7 +270,21 @@ describe('loadCollectiveBookingLinksForVenue', () => {
     expect(await loadCollectiveBookingLinksForVenue(fakeAdmin(tables), HOST)).toEqual([]);
     tables.venue_collective_members[1].status = 'active';
     expect(await loadCollectiveBookingLinksForVenue(fakeAdmin(tables), HOST)).toEqual([
-      { id: COL, name: 'Combo', url: '/book/c/combo' },
+      { id: COL, name: 'Combo', url: '/book/c/combo', serviceModel: 'legacy_copies' },
+    ]);
+  });
+
+  // The sidebar offers "Manage Collective" only on shared services, so the link carries the model.
+  it('says which model each collective runs on', async () => {
+    const tables = collectiveTables([
+      { id: 'm1', collective_id: COL, venue_id: HOST, status: 'active', joined_at: '2026-09-01T00:00:00Z' },
+      { id: 'm2', collective_id: COL, venue_id: OTHER, status: 'active', joined_at: '2026-09-02T00:00:00Z' },
+    ]);
+    (tables.venue_collectives[0] as Row).name = 'Combo';
+    (tables.venue_collectives[0] as Row).slug_strategy = 'dedicated';
+    (tables.venue_collectives[0] as Row).service_model = 'replicas';
+    expect(await loadCollectiveBookingLinksForVenue(fakeAdmin(tables), HOST)).toEqual([
+      { id: COL, name: 'Combo', url: '/book/c/combo', serviceModel: 'replicas' },
     ]);
   });
 });

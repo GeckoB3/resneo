@@ -974,7 +974,7 @@ export async function loadActiveCollectiveForVenue(
 export async function loadCollectiveBookingLinksForVenue(
   admin: SupabaseClient,
   venueId: string,
-): Promise<{ id: string; name: string; url: string }[]> {
+): Promise<{ id: string; name: string; url: string; serviceModel: string }[]> {
   const { data: memberRows } = await admin
     .from('venue_collective_members')
     .select('collective_id')
@@ -985,7 +985,7 @@ export async function loadCollectiveBookingLinksForVenue(
 
   const { data: cols } = await admin
     .from('venue_collectives')
-    .select('id, name, slug, slug_strategy, adopted_venue_id')
+    .select('id, name, slug, slug_strategy, adopted_venue_id, service_model')
     .in('id', ids)
     .eq('status', 'active')
     .eq('page_mode', 'unified_catalog');
@@ -1004,10 +1004,13 @@ export async function loadCollectiveBookingLinksForVenue(
     activeCount.set(k, (activeCount.get(k) ?? 0) + 1);
   }
 
-  const out: { id: string; name: string; url: string }[] = [];
+  const out: { id: string; name: string; url: string; serviceModel: string }[] = [];
   for (const c of cols) {
     if ((activeCount.get(c.id as string) ?? 0) < 2) continue;
     const name = (c.name as string) ?? 'Combined booking page';
+    // Shared services put the collective's own area in the sidebar; the older model has no area
+    // to run, so only its combined page is linked (2026-09-17).
+    const serviceModel = (c.service_model as string | null) ?? 'legacy_copies';
     if ((c.slug_strategy as string) === 'adopt_member' && c.adopted_venue_id) {
       if ((c.adopted_venue_id as string) === venueId) {
         // The combined page lives at this venue's own address. It is returned
@@ -1019,7 +1022,7 @@ export async function loadCollectiveBookingLinksForVenue(
           .select('slug')
           .eq('id', venueId)
           .maybeSingle();
-        if (own?.slug) out.push({ id: c.id as string, name, url: `/book/${own.slug as string}` });
+        if (own?.slug) out.push({ id: c.id as string, name, url: `/book/${own.slug as string}`, serviceModel });
         continue;
       }
       const { data: adopted } = await admin
@@ -1027,9 +1030,9 @@ export async function loadCollectiveBookingLinksForVenue(
         .select('slug')
         .eq('id', c.adopted_venue_id as string)
         .maybeSingle();
-      if (adopted?.slug) out.push({ id: c.id as string, name, url: `/book/${adopted.slug as string}` });
+      if (adopted?.slug) out.push({ id: c.id as string, name, url: `/book/${adopted.slug as string}`, serviceModel });
     } else {
-      out.push({ id: c.id as string, name, url: `/book/c/${c.slug as string}` });
+      out.push({ id: c.id as string, name, url: `/book/c/${c.slug as string}`, serviceModel });
     }
   }
   return out;

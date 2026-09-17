@@ -65,7 +65,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   let venueId: string | undefined;
   let isAdmin = false;
   let hasLinkedAccounts = false;
-  let collectiveBookingLinks: { id: string; name: string; url: string }[] = [];
+  let collectiveBookingLinks: { id: string; name: string; url: string; serviceModel: string }[] = [];
   let planStatus: string = 'active';
   let subscriptionExpiredCancelled = false;
   let onboardingCompleted = true;

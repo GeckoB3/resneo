@@ -53,6 +53,47 @@ Query the **live database**, not `migrations/` history, for the reason given at 
 
 ---
 
+## Host-write exception: venue collectives on shared services (added 2026-09-17)
+
+**The rule "a venue's rows are written only by that venue" has one deliberate exception.** In a venue collective on shared services (`venue_collectives.service_model = 'replicas'`, migrations `20270215120000` to `20270218220000`; design in `Docs/collective-one-venue-plan.md` §6.3 to §6.5), the host's changes are written into **member venues' tenancy**. Collectives on `legacy_copies`, which is every collective until `scripts/collective-replicas-migrate.mjs` moves it, are unaffected: every engine function and lock below is gated on the model and does nothing for them.
+
+**Who writes.** Only the collective engine: `SECURITY DEFINER` functions with `SET search_path = ''`, revoked from `PUBLIC`, `anon` and `authenticated` and granted to `service_role` only, called by server routes that have already authorised the caller (see `Docs/api-venue-permissions-matrix.md`) and by the collective crons. Each entry point turns on a transaction-local flag, `resneo.collective_engine`, through `collective_engine_enter()` and restores it with `collective_engine_leave()`; a failure rolls the setting back with the transaction. (Hosted Supabase refused `SET resneo.collective_engine = 'on'` as a function-level clause, 42501 on staging 2026-09-15, which is why the flag is set at run time.) Every engine write is recorded in `collective_audit_events`, which is append-only and has no FK, with actor venue, user and the before and after values.
+
+**What it writes in a member's tenancy** (rows whose `venue_id` is the member's):
+
+| Table | What |
+|-------|------|
+| `service_items`, `service_variants` | The replica service and its options, from the host's master through the column registry (`collective_column_classes`); venue-controlled columns such as `capacity_per_session` and `pre_appointment_instructions` are seeded once and never overwritten |
+| `calendar_service_assignments` | The host's choice of which member calendars offer a service (`collective_set_calendar_offering`, the only writer of another venue's assignments) and a calendar's own values (`collective_set_calendar_values`) |
+| `addon_groups`, `addons`, `service_addon_groups` | Managed add-on groups (`managed_by_collective_id`), their options and a replica's links |
+| `compliance_types`, `compliance_type_versions`, `service_compliance_requirements` | Managed forms, their versions and a replica's requirements |
+| `service_categories` | Managed headings |
+| `bookings`, `booking_addons`, `events` | Only `collective_move_booking` (a booking moved to another venue: a new booking at the target venue, and the original cancelled) and the migration's fill of a missing `service_price_snapshot_pence`. Guests are matched or created in the target venue by the route, not the engine. |
+
+The engine's own tables (`collective_service_replicas`, `collective_catalogue_revisions`, `collective_audit_events`, `collective_operations`) are `REVOKE ALL ... FROM PUBLIC, anon, authenticated`, with no client policies.
+
+**Lock triggers.** While a member is active in an active shared-services collective (a suspended member and a paused collective stay locked), `BEFORE` triggers refuse any write without the engine flag, from a route, the app, an import or a support script alike (`20270216120000_collective_engine_locks.sql`):
+
+| Code | Error | Refuses |
+|------|-------|---------|
+| RN001 | `COLLECTIVE_MANAGED_SERVICE` | Changing a replica service, its options or its managed heading; re-pointing a calendar assignment to or from a replica |
+| RN002 | `COLLECTIVE_OFFERED_SERVICE` | Deleting a host master that has an active offering |
+| RN003 | `COLLECTIVE_MANAGED_ADDON_GROUP` | Changing managed add-on groups, their options or a replica's group links; a member's own service linking a managed group |
+| RN004 | `COLLECTIVE_MANAGED_COMPLIANCE_TYPE` | Changing managed forms, their versions or a replica's requirements; a new requirement on a managed form from the member's own services (D57: requirements that existed before the takeover stay editable) |
+
+Left open on purpose: columns the registry classes as the venue's own or not copied, a replica's `category_id` becoming NULL through the one FK cascade, and inserting or deleting calendar assignments (a member chooses which of its calendars offer a replica). Three related refusals sit outside the locks migration: RN005 (`COLLECTIVE_HOST_CHANGE_REFUSED`, only the engine may change `host_venue_id` on this model), RN007 (`COLLECTIVE_SERVICE_PARKED`, a new booking on a parked service, `20270217120000`), and the legacy sync columns on `service_items`, which `20270214130000` refuses to client writes outright (the plan's RN006). Routes map these codes to a sentence (`src/lib/linked-accounts/replicas/db-errors.ts`).
+
+**Release.** When a membership stops being active, an `AFTER UPDATE OF status` trigger runs `collective_release_member`, which lifts the locks and clears the managed markers in the same transaction, so a venue that leaves can edit everything at once. No engine function writes `account_links` (D41).
+
+**What to check.**
+
+- Grants: the engine functions and tables must stay unreachable for `anon` and `authenticated` on the **live** database (`npm run check:function-grants`, `npm run check:table-grants`), for the reason at the top of this file.
+- The flag is a custom setting, not a privilege. It is safe only while client roles have no path to set it: PostgREST exposes the `public` schema, not `pg_catalog.set_config`, and the only functions in the migrations that set it (`collective_engine_enter` and `collective_engine_leave`) are revoked from client roles, as is every function in `20270215120000` to `20270218220000` (none is granted to `anon` or `authenticated`). Confirm those revokes on the live database, and treat any new client-executable function that calls `set_config` as a way round the locks.
+- The "one live collective per venue" unique indexes are not yet added (`20270215120000` defers them until invariant I7 returns 0 on production); exclusivity is enforced by the routes and the engine under the collective lock.
+- pgTAP coverage: `supabase/tests/collective_*_test.sql`.
+
+---
+
 ## Customer-facing reads (portal)
 
 Ownership for a customer session is established through an **account-safe view**, never through a policy on the base table and never through the admin client alone:

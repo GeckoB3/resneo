@@ -892,6 +892,12 @@ section 4 as deferred work.
                          `/book/c/{slug}`; each booking still
                          belongs to one venue.
 
+  **Shared services**    Linked venues run as one business:    **Built on
+  **for collectives**    the host owns one set of services     staging**
+                         for every venue, and each venue
+                         keeps its own calendars, clients,
+                         bookings and payments.
+
   **Settings and audit** Admins manage links under **Settings  **Shipped**
                          → Linked Accounts**; actions are
                          logged for compliance review.
@@ -899,6 +905,47 @@ section 4 as deferred work.
 
 Specification: `Docs/reserveni-linked-accounts-spec.md`. Calendar grid
 integration scope: `Docs/archive/reserveni-linked-calendar-grid-integration-scope.md`.
+
+**Venue collectives on shared services (amended 2026-09-17).** A
+collective is extra functionality on top of full-access account links.
+It never creates, changes or ends a link, so what venues can see of each
+other before, during and after a collective comes from the links alone.
+On the shared-services model:
+
+- **The host runs the menu.** The host's own services are the ones on
+  the collective page. The host sets their name, description, price,
+  deposit, options, add-ons and forms for every venue, and chooses which
+  calendars at any venue offer them. Each member holds a locked copy
+  (a replica) that only the collective engine writes. Calendars may vary
+  price, length, buffer, deposit and colour only where the host allows
+  it; name and description are the same everywhere.
+- **One storefront.** While the collective is live, every venue's own
+  booking page, the host's included, sends appointment guests to the
+  collective page. A venue's other appointment services are parked:
+  nobody can make a new booking for them, and existing bookings are
+  unaffected. The collective page is appointments only.
+- **One set of booking rules.** The host's guest self-reschedule,
+  waitlist, "Any available" and staff-first settings apply to the whole
+  page. Communication policies, SMS and in-person payments stay with
+  each venue.
+- **Each venue keeps what is its own.** Calendars, working hours,
+  clients, bookings and payments stay with the venue that owns them.
+  Guests pay the venue they book with. A plain booking can be moved to
+  another venue's calendar; a booking with a payment, forms, a visit or
+  a group stays where it is.
+- **Visible by agreement.** Joining asks each venue to agree that the
+  venues can see each other's clients, bookings and takings through
+  their links, and reports name every venue's figures.
+- **Leaving is lossless.** A venue that leaves keeps every service,
+  calendar choice and booking as its own, and its own page comes back.
+- **Migration.** Existing collectives stay on the older model (each
+  venue's own service copies) until each is moved over by a script. At
+  the move the host's values apply to every service on the page, and
+  every existing booking is left exactly as it was. New collectives are
+  still created on the older model until the switch is made.
+
+Design: `Docs/collective-one-venue-plan.md` and
+`Docs/collective-one-venue-ux-spec.md`.
 
 # 4. What Is Not in the MVP
 
@@ -2089,6 +2136,43 @@ is disproportionately high relative to the effort required.
   **Venue collective**   A combined public booking page (`/book/c/{slug}`)
                          joining two or more linked venues under shared
                          branding. Bookings still belong to one venue each.
+                         On shared services (2026-09-17) the venues run as
+                         one business with one set of services. It sits
+                         on full-access account links and never changes
+                         them. See section 3.10.
+
+  **Collective page**    The collective's public booking page,
+  **(combined page)**    `/book/c/{slug}` (embed `/embed/c/{slug}`), or a
+                         member's own address when that member's admin
+                         agreed to lend it. Appointments only. While the
+                         collective is live, each venue's own appointment
+                         links send guests here.
+
+  **Host**               The venue that runs a collective: it owns the
+                         services on the collective page, chooses which
+                         calendars offer them, designs the page, and its
+                         booking settings apply to the whole page.
+
+  **Member**             A venue in a collective other than the host. It
+                         keeps its own calendars, hours, clients, bookings
+                         and payments, and chooses which of its own
+                         calendars offer each shared service.
+
+  **Shared service       A service the host puts on the collective page.
+  (replica)**            The host's own service is the master. Each member
+                         holds a locked copy of it, the replica, written
+                         only by the collective engine and kept in step
+                         with every host save. A replica becomes the
+                         member's own ordinary service when the member
+                         leaves.
+
+  **Parked service**     An appointment service at a venue in a live
+                         collective that is not on the collective page.
+                         No new booking can be made for it anywhere;
+                         existing bookings stay fully manageable. Parking
+                         is worked out from the membership, never stored,
+                         and ends when the venue leaves or the collective
+                         ends.
   -----------------------------------------------------------------------
 
 *End of Document*

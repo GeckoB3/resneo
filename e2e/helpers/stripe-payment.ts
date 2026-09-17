@@ -88,6 +88,15 @@ async function tryFillFrame(frame: ReturnType<Page['frameLocator']>): Promise<bo
     } else if ((await postal.count()) > 0) {
       await postal.first().fill(countryCode && countryCode !== 'GB' ? TEST_CARD.zip : TEST_CARD.postcode);
     }
+    // Reading the label once is not enough: the element can relabel the field to "ZIP" just
+    // after it was filled with a UK postcode, and submit then fails with "Your ZIP code is
+    // invalid" (CI, 2026-09-17, twice). Look again once it has settled and correct the value.
+    await frame.owner().page().waitForTimeout(300);
+    const zipNow = frame.getByRole('textbox', { name: /zip/i });
+    if ((await zipNow.count()) > 0) {
+      const value = (await zipNow.first().inputValue().catch(() => '')) ?? '';
+      if (!/^\d{5}$/.test(value)) await zipNow.first().fill(TEST_CARD.zip);
+    }
     return true;
   }
 

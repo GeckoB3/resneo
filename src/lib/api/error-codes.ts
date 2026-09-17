@@ -175,6 +175,10 @@ export const API_ERROR_CODES = [
   'COLLECTIVE_MOVE_SERVICE',
   /** The booking cannot move there: not the same live collective, or not the venue's client (409, D46). */
   'COLLECTIVE_MOVE_NOT_ALLOWED',
+  /** The migration to shared services cannot start, finish or roll back in this state (W9; script only). */
+  'COLLECTIVE_MIGRATION_REFUSED',
+  /** The migration's switch waits for every venue's copy to converge (W9; script only). */
+  'COLLECTIVE_LINKS_BEHIND',
   /** The time is not free on the other venue's calendar (409, D46). */
   'COLLECTIVE_MOVE_TIME',
   /** An older manager action with no shared-services equivalent (MGR-01), each with its own reason (409). */

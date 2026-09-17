@@ -20,7 +20,7 @@ export const article: HelpArticle = {
     'overrides',
     'categories',
   ],
-  verified: '2026-09-12',
+  verified: '2026-09-17',
   content: `
 # Appointment services
 
@@ -227,6 +227,14 @@ The **Categories** tab holds your headings. **Add category** creates one, the dr
 ## What a team member sees
 
 Team members who are not admins get a shorter form. They can create services for the calendars an admin has linked to their login, and on each card they get an **Offer on your calendars** box with their own columns listed. Calendars are labelled **(your calendar)** or **(view only)**. They cannot edit or delete a saved service, and category, options, add-ons, processing time, location, per-calendar overrides and the service's schedule are all admin only.
+
+## If your venue is in a collective
+
+When your venue is part of a [venue collective](/help/getting-started/venue-collectives) that shares one set of services, the host venue manages those services for every venue.
+
+- **At the host**, a service on the collective page shows a **Collective** badge. Saving it changes it at every venue in the collective.
+- **At a member venue**, the host's services are listed under **From** and the host's name. Open one with **View** to see its settings. You choose which of your own calendars offer it, and set per-calendar values where the host allows them. Everything else is the host's to change.
+- Your own services that are not on the collective page are **parked**: nobody can book them while the collective is live, but bookings already made are kept. You can suggest one to the host with **Suggest to** and the host's name.
 
 ## Common problems & fixes
 

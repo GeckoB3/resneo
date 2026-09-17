@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Your public booking page and embed",
   description: "Share your booking link, add a booking widget to your website, and brand it with your colour and a QR code.",
   tags: ["public booking","embed","widget","qr code","accent colour","booking page address","guests","resize.js"],
-    verified: '2026-09-12',
+    verified: '2026-09-17',
   content: `# Your public booking page and embed
 
 Your booking page is where clients book with you online, day or night. This guide covers finding your link, giving each person their own, branding the page, filling out its tabs, and putting it on your own website.
@@ -29,11 +29,13 @@ Miss any one and your page will load and look right, but offer nothing to book.
 
 Your link is your booking page address with \`/book/\` in front of it.
 
-1. Open **Settings**, then the **Booking Page** tab. Under **URL & branding** sits the **Your booking page** card. If your venue is part of a combined booking page, the tab opens on that page instead: choose **This venue's own page** at the top to reach these settings.
+1. Open **Settings**, then the **Booking Page** tab. Under **URL & branding** sits the **Your booking page** card. If your venue is part of a combined booking page, the tab opens on that page instead: choose **This venue’s own page** at the top to reach these settings.
 2. At the top of the card, **Public booking page** shows your full link. Select it to copy it, or click **Open booking page in a new tab** to see it as a client would. The sidebar's **Your Booking Page** link opens the same page (it is hidden while your venue is part of a combined booking page).
 3. To change your part of the link, use the **Booking page address** field in the **Book now** group just below. Lowercase letters, numbers and hyphens only. As you type, ResNeo checks the address and tells you **This address is available.** or that it is already in use. It saves on its own once it is valid.
 
 :::help-figure public-surfaces
+
+> **In a venue collective?** While the collective page is live and at least one of your calendars is on it, clients who open your own link are sent to the collective page, keeping the service, person, date and time they picked. The top of the **Booking Page** tab says whether this is happening, and why not when it is not. See [Run several venues as one collective](/help/getting-started/venue-collectives).
 
 Share it anywhere: your social bios, your Google Business profile, a "Book now" button, posters, or a QR code.
 
@@ -100,7 +102,7 @@ Near the top of the **Your booking page** card, click **Live preview** to expand
 
 The widget's **Accent colour (optional)** sets its buttons and highlights. Leave it blank and the widget uses your **Brand colour**; pick a colour or type a 6-digit hex code to use something different. It saves on its own.
 
-If your venue is part of a combined booking page, a **What to embed** menu appears first: choose **My venue only** or the **Venue collective** page.
+If your venue is part of a combined booking page, a **What to embed** menu appears first: choose **My venue only** or **Venue collective:** and the collective's name. The collective's embed stretches and takes your accent colour just like your own.
 
 > If the colour will not save, you will see **Could not save accent colour. Use 6 hex digits.** Clear the box completely and click away. That resets it. The **Reset** button only appears once the colour is already valid, so it will not help here.
 

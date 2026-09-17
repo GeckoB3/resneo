@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Run several venues as one collective",
   description: "Put linked venues on one booking page, with one set of services that the host manages and every venue keeping its own calendars, clients and payments.",
   tags: ["venue collective","combined booking page","multi venue","host","member","parked services","staff bookings only","shared services"],
-  verified: '2026-09-16',
+  verified: '2026-09-17',
   content: `# Run several venues as one collective
 
 A **collective** puts two or more linked venues on one public booking page, so your clients see one business. One venue is the **host**. The host decides which services are on the page and sets their prices, deposits, options, add-ons and forms for every venue. Each venue keeps its own calendars, working hours, clients, bookings and payments.
@@ -85,6 +85,13 @@ Staff at every venue book for the collective from the diary, and every column op
 - A booking with a deposit, card hold or payment, completed forms, or that is part of a visit or group, stays with the venue that took it. ResNeo says why, and you can still move it within that venue.
 - If the same person has a calendar at two venues and is already booked at one, whoever books second sees a warning.
 - One visit is always with one person, so a multi-service visit is at one venue. A group booking is seen at one venue too.
+
+## Clients and reports
+
+- **Each venue keeps its own client records.** A client who books at two venues in the collective has a record at each, with its own visits, notes and tags. The two records cannot be merged, because each belongs to the venue that took the booking. This is expected.
+- **What you can see of other venues comes from your account links**, not from the collective. When you join, you agree that the venues can see each other's clients, bookings and takings through those links. Leaving or ending the collective does not change the links.
+- **Reports** name every venue. **Booked revenue** lists each venue's figure in its own row, with a column for the part booked through the collective page, and the export carries the same breakdown.
+- On the **Bookings** list, a **Booked through** filter shows the bookings made on the collective page, and each booking's details say **Booked through** and the collective's name.
 
 ## Leaving, removing and ending
 

@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Set up your services",
   description: "Create the services clients can book: set one fixed length and price or offer several bookable options, add optional extras with add-ons, decide how clients pay, and link them to a calendar.",
   tags: ["services","appointments","duration","deposit","payments","calendar","catalogue","booking","one fixed offering","multiple bookable options","options","variants","add-ons","extras","upsell","card hold","no-show fee","processing time","categories","booking interval","start times","location","online"],
-  verified: '2026-09-12',
+  verified: '2026-09-17',
   content: `# Set up your services
 
 A service is anything a client can book with you: a consultation, a treatment, a session. Get one set up here and it will show on your booking page, ready for clients to choose a time.
@@ -195,6 +195,14 @@ Each service card shows its duration, price, payment rule, options, add-ons and 
 - Team members cannot edit or delete a saved service, even one they created. Ask an admin.
 
 :::help-figure services-flow
+
+## If your venue is in a collective
+
+When your venue is part of a [venue collective](/help/getting-started/venue-collectives) that shares one set of services, the host venue manages those services for every venue.
+
+- **At the host**, a service on the collective page shows a **Collective** badge. Saving it changes it at every venue in the collective.
+- **At a member venue**, the host's services are listed under **From** and the host's name. Open one with **View** to see its settings. You choose which of your own calendars offer it, and set per-calendar values where the host allows them. Everything else is the host's to change.
+- Your own services that are not on the collective page are **parked**: nobody can book them while the collective is live, but bookings already made are kept. You can suggest one to the host with **Suggest to** and the host's name.
 
 ## Common problems & fixes
 

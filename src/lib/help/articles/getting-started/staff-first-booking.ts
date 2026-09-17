@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Let clients choose their person first",
   description: "Swap the order of your booking page so clients pick who they want to see before they pick a service.",
   tags: ["staff-first","booking order","booking page","picker","team photos","who first","practitioner"],
-  verified: '2026-09-12',
+  verified: '2026-09-17',
   content: `# Let clients choose their person first
 
 By default your booking page asks for a service, then who the client wants to see. If your regulars book a person rather than a treatment, you can swap those two steps around with the **Staff-first booking** setting.
@@ -89,7 +89,7 @@ Walk-ins do ask who first, even when you start a walk-in from a calendar column.
 
 ## If you host a combined page
 
-A combined page follows the host venue's setting, because it is presented to clients as one business. Turn it on at the host venue and the combined page swaps over too. On the host's **Linked Accounts** tab, **Manage combined page** lists it under **Settings that follow the host venue**, with whether it is currently on or off. Cards there are a photo and a name, the same as anywhere else. Where two people across the venues share a name, the venue's name is added after it (for example "Andrew · Bright Cuts") so clients can tell them apart.
+A combined page follows the host venue's setting, because it is presented to clients as one business. Turn it on at the host venue and the combined page swaps over too. On the host's **Linked Accounts** tab, **Manage combined page** lists it under **Settings that follow the host venue**, with whether it is currently on or off. When two people are free at the same time, the combined page follows the host's **Any available** choice too: a random pick stays random, and an order the host set is followed for the calendars it names. Calendars it does not name share those times evenly, so no one venue gets them all. Cards there are a photo and a name, the same as anywhere else. Where two people across the venues share a name, the venue's name is added after it (for example "Andrew · Bright Cuts") so clients can tell them apart.
 
 ## Common problems & fixes
 

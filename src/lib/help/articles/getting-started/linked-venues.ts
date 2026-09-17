@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Link with another venue",
   description: "Share calendars and bookings with another ResNeo venue, and see how links underpin a venue collective.",
   tags: ["linked accounts","linked venues","venue collective","combined booking page","chair rental","multi venue","sharing"],
-    verified: '2026-09-16',
+  verified: '2026-09-17',
   content: `# Link with another venue
 
 If you share a space with another business, rent a chair to someone self-employed, or run more than one venue, you can link your ResNeo accounts. Linking lets two venues see each other's calendars and, if you both agree, manage each other's bookings.
@@ -23,7 +23,7 @@ There are two separate things here, and most businesses only need the first.
 | Who sees it | Only you and your teams | Your clients |
 | Good for | A chair renter, a shared room, covering each other | Two businesses trading under one name |
 | What it needs | Whatever access you both agree | Full access, both ways, no calendar limits |
-| Undoing it | **Unlink** | **Dissolve collective** |
+| Undoing it | **Unlink** | The host ends it with **End** and the collective's name |
 
 Start with a link. You do not need a collective to share a diary.
 

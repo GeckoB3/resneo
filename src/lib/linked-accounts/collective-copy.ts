@@ -187,6 +187,7 @@ export const COLLECTIVE_COPY = {
     'Your forms are switched off, so {count} services that need a form are hidden from your guests.',
   'ov.todo.formsOffYouOne':
     'Your forms are switched off, so {count} service that needs a form is hidden from your guests.',
+  'cal.parkedHeading': 'Parked: nobody can book these while the collective is live',
   'svc.card.activeParked': 'Active (bookable again if you leave {collective})',
   'svc.offer.chooseCalendars': 'Choose calendars',
   'svc.card.onPageSwitch': 'On the {collective} page',

@@ -16,6 +16,7 @@ import { normalizePublicBaseUrl, publicBaseUrlHost } from '@/lib/public-base-url
 import { CalendarLimitMessage } from '@/components/dashboard/CalendarLimitMessage';
 import { Dialog } from '@/components/ui/primitives/Dialog';
 import { Button } from '@/components/ui/primitives/Button';
+import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 const PUBLIC_BOOK_ORIGIN = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
 const PUBLIC_BOOK_HOST = publicBaseUrlHost(PUBLIC_BOOK_ORIGIN);
 
@@ -41,6 +42,8 @@ export interface BookableCalendarRow {
 interface ServiceRow {
   id: string;
   name: string;
+  /** Present while the venue is in a live collective for the services on its page. */
+  collective?: { role?: string } | null;
 }
 
 interface PractitionerServiceLink {
@@ -392,12 +395,19 @@ export function BookableCalendarsPanel({
         : 'border-slate-200/80 opacity-[0.97] ring-slate-900/[0.03]'
     }`;
 
+  const inLiveCollective = services.some((s) => Boolean(s.collective));
+
   const renderCalendarCard = (p: BookableCalendarRow, dragHandle: ReactNode | null) => {
     const columnAlerts = calendarColumnAlerts[p.id] ?? [];
-    const linkedSvcs = pLinks
+    const linkedRows = pLinks
       .filter((l) => l.practitioner_id === p.id)
-      .map((l) => services.find((s) => s.id === l.service_id)?.name)
-      .filter((n): n is string => Boolean(n));
+      .map((l) => services.find((s) => s.id === l.service_id))
+      .filter((s): s is ServiceRow => Boolean(s));
+    // Parked services stay assigned but cannot be booked, so they are listed apart. In a live
+    // collective a service with no collective block is parked too (it is not on the page).
+    const isParked = (s: ServiceRow) => s.collective?.role === 'parked' || (inLiveCollective && !s.collective);
+    const linkedSvcs = linkedRows.filter((s) => !isParked(s)).map((s) => s.name);
+    const parkedSvcs = linkedRows.filter(isParked).map((s) => s.name);
     const classNames = classTypes
       .filter((ct) => (ct.instructor_calendar_id ?? ct.instructor_id) === p.id)
       .map((ct) => ct.name);
@@ -498,11 +508,26 @@ export function BookableCalendarsPanel({
                           </li>
                         ))}
                       </ul>
-                    ) : services.length > 0 ? (
+                    ) : parkedSvcs.length === 0 && services.length > 0 ? (
                       <span className="text-[11px] text-slate-500">None</span>
-                    ) : (
+                    ) : parkedSvcs.length === 0 ? (
                       <span className="text-[11px] text-slate-400">—</span>
-                    )}
+                    ) : null}
+                    {parkedSvcs.length > 0 ? (
+                      <div className={linkedSvcs.length > 0 ? 'mt-2' : ''}>
+                        <p className="text-[11px] font-medium text-slate-500">{collectiveCopy('cal.parkedHeading')}</p>
+                        <ul className="mt-1 flex flex-wrap gap-1" aria-label={collectiveCopy('common.pill.parked')}>
+                          {parkedSvcs.map((name) => (
+                            <li
+                              key={name}
+                              className={`${chipBase} border border-dashed border-slate-300 bg-white text-slate-500 ring-transparent`}
+                            >
+                              {name}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
                   </dd>
                 </div>
                 {shows.classes ? (

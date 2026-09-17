@@ -1462,7 +1462,8 @@ function SettingsViewInner({
             tabs={tabBarTabs}
             value={selectedTab}
             onChange={(id) => replaceWithTab(id)}
-            mobileLayout="two-row-scroll"
+            mobileLayout="select"
+            mobileSelectLabel="Settings"
           />
         </div>
       </div>

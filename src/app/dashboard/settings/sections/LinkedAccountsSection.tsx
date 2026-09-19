@@ -629,6 +629,14 @@ function LinkedAccountsSectionInner({ venueName }: { venueName: string }) {
                       <p className="text-xs text-slate-600">
                         Sent {formatDate(link.createdAt)} · awaiting response
                       </p>
+                      {data.proposedCollectives?.[link.id] ? (
+                        <p className="text-xs font-medium text-brand-700">
+                          {collectiveCopy('la.sent.collective', {
+                            venue: link.otherVenue.name,
+                            collective: data.proposedCollectives[link.id]!.name,
+                          })}
+                        </p>
+                      ) : null}
                     </div>
                     <button
                       type="button"
@@ -758,7 +766,8 @@ function LinkedAccountsSectionInner({ venueName }: { venueName: string }) {
           collective={data.proposedCollectives?.[reviewLink.id] ?? null}
           onClose={() => setReviewLink(null)}
           onDone={async (outcome) => {
-            setReviewLink(null);
+            // Accepting keeps the dialog open on its receipt, which says what happens next; declining closes it.
+            if (outcome.declined) setReviewLink(null);
             if (outcome.joinError && outcome.collectiveName) {
               setActionError(
                 collectiveCopy('respond.done.joinFailed', {

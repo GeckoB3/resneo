@@ -3,7 +3,7 @@ import { resolveLinkAdmin } from '@/lib/linked-accounts/route-helpers';
 import { createLinkSchema } from '@/lib/linked-accounts/validation';
 import { countOutgoingPendingRequests, loadLinkViewsForVenue } from '@/lib/linked-accounts/queries';
 import { createLinkRequest } from '@/lib/linked-accounts/link-request';
-import { loadInvitationsByHost } from '@/lib/linked-accounts/proposed-collectives';
+import { loadInvitationsByHost, loadInvitationsSentByHost } from '@/lib/linked-accounts/proposed-collectives';
 import { MAX_PENDING_OUTGOING_REQUESTS } from '@/lib/linked-accounts/types';
 
 /** GET /api/venue/account-links — list links for the current venue. */
@@ -20,16 +20,22 @@ export async function GET() {
   }
 
   try {
-    const [links, outgoingPendingCount, invitationsByHost] = await Promise.all([
+    const [links, outgoingPendingCount, invitationsByHost, invitationsSent] = await Promise.all([
       loadLinkViewsForVenue(ctx.admin, ctx.venueId),
       countOutgoingPendingRequests(ctx.admin, ctx.venueId),
       loadInvitationsByHost(ctx.admin, ctx.venueId),
+      loadInvitationsSentByHost(ctx.admin, ctx.venueId),
     ]);
     // The collective invitation that rides on a pending request from its host, by link id
     // (Docs/link-and-collective-setup-wizard-plan.md, L11), so the review dialog can cover both.
     const proposedCollectives: Record<string, { id: string; name: string; slug: string; serviceModel: string }> = {};
     for (const link of links) {
-      if (link.status !== 'pending' || link.initiatedByMe) continue;
+      if (link.status !== 'pending') continue;
+      if (link.initiatedByMe) {
+        const sent = invitationsSent.get(link.otherVenue.id);
+        if (sent) proposedCollectives[link.id] = { ...sent, serviceModel: 'replicas' };
+        continue;
+      }
       const invitation = invitationsByHost.get(link.otherVenue.id);
       if (invitation) {
         proposedCollectives[link.id] = {

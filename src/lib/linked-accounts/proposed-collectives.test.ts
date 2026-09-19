@@ -127,3 +127,39 @@ describe('closeInvitationForLink', () => {
     expect((close.payload as { p_reason: string }).p_reason).toBe('expired');
   });
 });
+
+import { loadInvitationsSentByHost, loadMemberWaiting } from './proposed-collectives';
+
+describe('loadInvitationsSentByHost', () => {
+  it('keys the host\u2019s open invitations by invitee', async () => {
+    const recording = makeRecordingDb((call) => {
+      if (call.table === 'venue_collectives') return { data: [{ id: COLLECTIVE, name: 'Northside', slug: 'northside' }] };
+      if (call.table === 'venue_collective_members') return { data: [{ venue_id: OTHER, collective_id: COLLECTIVE }] };
+      return undefined;
+    });
+    const sent = await loadInvitationsSentByHost(recording.db, HOST);
+    expect(sent.get(OTHER)).toEqual({ id: COLLECTIVE, name: 'Northside', slug: 'northside' });
+  });
+});
+
+describe('loadMemberWaiting', () => {
+  function db(assignments: number) {
+    return makeRecordingDb((call) => {
+      if (call.table === 'venue_collective_members') return { data: [{ collective_id: COLLECTIVE }] };
+      if (call.table === 'venue_collectives') return { data: [{ id: COLLECTIVE, name: 'Northside', host_venue_id: HOST, status: 'active', service_model: 'replicas' }] };
+      if (call.table === 'collective_service_items') return { data: [{ id: 'i-1', master_service_id: 'svc-1' }] };
+      if (call.table === 'collective_service_replicas') return { data: [] };
+      if (call.table === 'calendar_service_assignments') return { data: assignments > 0 ? [{ id: 'a-1' }] : [] };
+      if (call.table === 'venues') return { data: { name: 'Zen Studio' } };
+      return undefined;
+    });
+  }
+
+  it('names the host while nothing on the page is bookable', async () => {
+    expect(await loadMemberWaiting(db(0).db, ME)).toEqual([{ collectiveId: COLLECTIVE, name: 'Northside', hostName: 'Zen Studio' }]);
+  });
+
+  it('is quiet once the page is live', async () => {
+    expect(await loadMemberWaiting(db(1).db, ME)).toEqual([]);
+  });
+});

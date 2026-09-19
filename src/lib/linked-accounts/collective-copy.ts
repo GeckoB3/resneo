@@ -784,6 +784,13 @@ export const COLLECTIVE_COPY = {
   'banner.change.cta': 'Review change',
   'banner.setup.cta': 'Continue setup',
   'banner.dismiss': 'Dismiss for 24h',
+  'banner.waiting': 'Waiting for {venue} to review your link request. The link starts as soon as they accept.',
+  'banner.waitingWithCollective':
+    'Waiting for {venue} to review your link request and join {collective}. Once they accept, Continue setup appears here.',
+  'banner.waiting.cta': 'View request',
+  'banner.memberWaiting':
+    'You are part of {collective}. {host} is setting up the services and the shared booking page, so nothing is needed from you yet.',
+  'banner.memberWaiting.cta': 'View collective',
 
   // Sending: the Link with a venue wizard
   'setup.title': 'Link with a venue',
@@ -828,6 +835,7 @@ export const COLLECTIVE_COPY = {
     'When {venue} accepts, they join {collective} and a banner on your dashboard shows you how to finish the page: choose the services, then the calendars.',
   'setup.done.next.where': 'The request is listed under Pending requests on this tab. You can cancel it there.',
   'setup.done.close': 'Done',
+  'setup.done.next.watch': 'While you wait, a notice on your dashboard and on this tab says the request is with {venue}.',
   'setup.disabled.venue': 'Choose a venue to continue.',
   'setup.disabled.level': 'A link must grant access in at least one direction.',
   'setup.disabled.collective': 'Choose whether to start a collective.',
@@ -873,6 +881,19 @@ export const COLLECTIVE_COPY = {
   'respond.done.joinFailed':
     'The link with {venue} is active, but joining {collective} did not finish: {error} You can join from the collective\u2019s row on this tab.',
   'respond.loading': 'Loading the request...',
+  'respond.done.linked.title': 'You are linked with {venue}',
+  'respond.done.joined.title': 'You are linked with {venue} and part of {collective}',
+  'respond.done.linked.next': 'The link is active now. Open your Appointment Calendar to see {venue}\u2019s columns alongside your own.',
+  'respond.done.joined.next.host':
+    'Nothing is needed from you yet: {venue} is now setting up the services and the shared booking page for {collective}. A notice on your dashboard says so until the page is live.',
+  'respond.done.joined.next.own':
+    'Your own booking page carries on as it is until the {collective} page is live. You will be told when it is.',
+  'respond.done.joined.next.calendars':
+    'Once the services arrive, choose which of your calendars offer them under Calendar Availability, or let {venue} choose.',
+  'respond.done.close': 'Done',
+  'la.row.host.waiting': 'Waiting for {venueList} to accept your link request and join. Once they do, Continue setup appears here and on your dashboard.',
+  'la.row.member.waiting': '{host} is setting up the services and the shared booking page. Nothing is needed from you yet.',
+  'la.sent.collective': 'Also invites {venue} to join {collective}. Once they accept, Continue setup appears here.',
 
   // Finishing: the host puts services and calendars on the page
   'finish.title': 'Finish setting up {collective}',

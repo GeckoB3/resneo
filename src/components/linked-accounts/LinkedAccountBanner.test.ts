@@ -64,3 +64,29 @@ describe('LinkedAccountBanner items (Docs/link-and-collective-setup-wizard-plan.
     ]);
   });
 });
+
+describe('LinkedAccountBanner waiting states', () => {
+  it('tells the sender the request is with the other venue, naming the collective', () => {
+    const items = bannerItemsFromFeed({
+      outgoingRequests: [
+        { id: 'r-1', otherVenueName: 'Bloom', collective: { id: 'c-1', name: 'Northside' } },
+        { id: 'r-2', otherVenueName: 'Cedar', collective: null },
+      ],
+    });
+    expect(items[0]!.text).toBe('Waiting for Bloom to review your link request and join Northside. Once they accept, Continue setup appears here.');
+    expect(items[0]!.cta).toBe('View request');
+    expect(items[1]!.text).toBe('Waiting for Cedar to review your link request. The link starts as soon as they accept.');
+  });
+
+  it('tells a member that the host is still setting the page up', () => {
+    const items = bannerItemsFromFeed({ memberWaiting: [{ collectiveId: 'c-1', name: 'Northside', hostName: 'Zen Studio' }] });
+    expect(items).toEqual([
+      {
+        id: 'member-waiting:c-1',
+        text: 'You are part of Northside. Zen Studio is setting up the services and the shared booking page, so nothing is needed from you yet.',
+        cta: 'View collective',
+        href: '/dashboard/settings?tab=linked-accounts',
+      },
+    ]);
+  });
+});

@@ -55,6 +55,91 @@ export async function loadInvitationsByHost(
   return out;
 }
 
+/** The open invitations `hostVenueId` has sent from the collective it hosts, keyed by invitee. */
+export async function loadInvitationsSentByHost(
+  admin: SupabaseClient,
+  hostVenueId: string,
+): Promise<Map<string, { id: string; name: string; slug: string }>> {
+  const out = new Map<string, { id: string; name: string; slug: string }>();
+  const { data: hosted } = await admin
+    .from('venue_collectives')
+    .select('id, name, slug')
+    .eq('host_venue_id', hostVenueId)
+    .eq('status', 'active');
+  const collectives = (hosted ?? []) as Row[];
+  if (collectives.length === 0) return out;
+  const { data: invitations } = await admin
+    .from('venue_collective_members')
+    .select('venue_id, collective_id')
+    .in('collective_id', collectives.map((c) => c.id as string))
+    .eq('status', 'invited');
+  for (const row of (invitations ?? []) as Row[]) {
+    const c = collectives.find((x) => x.id === row.collective_id);
+    if (c) out.set(row.venue_id as string, { id: c.id as string, name: c.name as string, slug: c.slug as string });
+  }
+  return out;
+}
+
+/** Whether at least one calendar offers at least one service on the page: the page can take a booking. */
+async function collectiveHasBookableService(admin: SupabaseClient, collectiveId: string): Promise<boolean> {
+  const { data: items } = await admin
+    .from('collective_service_items')
+    .select('id, master_service_id')
+    .eq('collective_id', collectiveId)
+    .eq('status', 'active');
+  const masterIds = ((items ?? []) as Row[]).map((i) => i.master_service_id as string | null).filter((id): id is string => Boolean(id));
+  if (masterIds.length === 0) return false;
+  const { data: replicas } = await admin
+    .from('collective_service_replicas')
+    .select('replica_service_id')
+    .eq('collective_id', collectiveId)
+    .is('released_at', null);
+  const serviceIds = [
+    ...masterIds,
+    ...((replicas ?? []) as Row[]).map((r) => r.replica_service_id as string | null).filter((id): id is string => Boolean(id)),
+  ];
+  const { data: assignments } = await admin
+    .from('calendar_service_assignments')
+    .select('id')
+    .in('service_item_id', serviceIds)
+    .limit(1);
+  return (assignments ?? []).length > 0;
+}
+
+export interface MemberWaiting {
+  collectiveId: string;
+  name: string;
+  hostName: string;
+}
+
+/**
+ * The collectives `venueId` has joined as a member whose page is not live yet: the host is still
+ * putting services and calendars on it, and nothing is needed from the member (plan §4).
+ */
+export async function loadMemberWaiting(admin: SupabaseClient, venueId: string): Promise<MemberWaiting[]> {
+  const { data: memberships } = await admin
+    .from('venue_collective_members')
+    .select('collective_id')
+    .eq('venue_id', venueId)
+    .eq('status', 'active');
+  const ids = ((memberships ?? []) as Row[]).map((m) => m.collective_id as string);
+  if (ids.length === 0) return [];
+  const { data: collectives } = await admin
+    .from('venue_collectives')
+    .select('id, name, host_venue_id, status, service_model')
+    .in('id', ids)
+    .eq('status', 'active')
+    .eq('service_model', 'replicas')
+    .neq('host_venue_id', venueId);
+  const out: MemberWaiting[] = [];
+  for (const c of (collectives ?? []) as Row[]) {
+    if (await collectiveHasBookableService(admin, c.id as string)) continue;
+    const { data: host } = await admin.from('venues').select('name').eq('id', c.host_venue_id as string).maybeSingle();
+    out.push({ collectiveId: c.id as string, name: c.name as string, hostName: ((host as Row | null)?.name as string | null) ?? 'The host' });
+  }
+  return out;
+}
+
 /** The invitation from `hostVenueId` to `inviteeVenueId`, if one is open. */
 export async function loadInvitationForLink(
   admin: SupabaseClient,

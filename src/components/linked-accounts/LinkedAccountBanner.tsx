@@ -48,8 +48,10 @@ function filterVisible(items: BannerItem[], dismissed: Record<string, number>): 
 
 interface IncomingFeed {
   incomingRequests?: { id: string; otherVenueName: string; collective?: { id: string; name: string } | null }[];
+  outgoingRequests?: { id: string; otherVenueName: string; collective?: { id: string; name: string } | null }[];
   pendingChanges?: { id: string; otherVenueName: string }[];
   collectiveSetup?: { collectiveId: string; name: string; memberNames: string[] }[];
+  memberWaiting?: { collectiveId: string; name: string; hostName: string }[];
 }
 
 /** The banner rows a feed becomes; exported for the test. */
@@ -63,6 +65,14 @@ export function bannerItemsFromFeed(feed: IncomingFeed): BannerItem[] {
       cta: collectiveCopy('banner.review.cta'),
       href: `${TAB}&review=${encodeURIComponent(r.id)}`,
     })),
+    ...(feed.outgoingRequests ?? []).map((r) => ({
+      id: `waiting:${r.id}`,
+      text: r.collective
+        ? collectiveCopy('banner.waitingWithCollective', { venue: r.otherVenueName, collective: r.collective.name })
+        : collectiveCopy('banner.waiting', { venue: r.otherVenueName }),
+      cta: collectiveCopy('banner.waiting.cta'),
+      href: TAB,
+    })),
     ...(feed.pendingChanges ?? []).map((c) => ({
       id: `change:${c.id}`,
       text: collectiveCopy('banner.change', { venue: c.otherVenueName }),
@@ -74,6 +84,12 @@ export function bannerItemsFromFeed(feed: IncomingFeed): BannerItem[] {
       text: collectiveCopy('banner.setup', { venueList: formatVenueList(s.memberNames, 2) || 'Your partner venue', collective: s.name }),
       cta: collectiveCopy('banner.setup.cta'),
       href: `${TAB}&setup=${encodeURIComponent(s.collectiveId)}`,
+    })),
+    ...(feed.memberWaiting ?? []).map((m) => ({
+      id: `member-waiting:${m.collectiveId}`,
+      text: collectiveCopy('banner.memberWaiting', { collective: m.name, host: m.hostName }),
+      cta: collectiveCopy('banner.memberWaiting.cta'),
+      href: TAB,
     })),
   ];
 }
@@ -141,7 +157,7 @@ export function LinkedAccountBanner() {
           <div key={item.id} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 flex-1 items-start gap-2">
               <Pill variant="brand" size="sm" className="shrink-0">
-                {item.id.startsWith('setup:') ? 'Collective' : 'Linked accounts'}
+                {item.id.startsWith('setup:') || item.id.startsWith('member-waiting:') ? 'Collective' : 'Linked accounts'}
               </Pill>
               <p className="min-w-0 text-sm text-brand-950">
                 <svg

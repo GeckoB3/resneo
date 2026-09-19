@@ -96,6 +96,10 @@ describe('ReviewLinkRequestDialog', () => {
     await user.click(accept);
 
     await waitFor(() => expect(onDone).toHaveBeenCalledWith({ declined: false, joined: true, collectiveName: 'Northside', joinError: undefined }));
+    // The receipt stays open and says what happens next: the host sets the page up, nothing is needed yet.
+    expect(screen.getByRole('heading', { name: 'You are linked with Bloom and part of Northside' })).toBeInTheDocument();
+    expect(screen.getByText(/Bloom is now setting up the services and the shared booking page/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Done' })).toBeInTheDocument();
     expect(calls[0]!.body).toEqual({
       action: 'accept',
       collective: {

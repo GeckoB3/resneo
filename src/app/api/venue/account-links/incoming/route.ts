@@ -1,15 +1,22 @@
 import { NextResponse } from 'next/server';
 import { resolveLinkAdmin } from '@/lib/linked-accounts/route-helpers';
 import { loadLinkViewsForVenue } from '@/lib/linked-accounts/queries';
-import { loadCollectiveSetupNeeds, loadInvitationsByHost } from '@/lib/linked-accounts/proposed-collectives';
+import {
+  loadCollectiveSetupNeeds,
+  loadInvitationsByHost,
+  loadInvitationsSentByHost,
+  loadMemberWaiting,
+} from '@/lib/linked-accounts/proposed-collectives';
 
-const EMPTY = { incomingRequests: [], pendingChanges: [], collectiveSetup: [] };
+const EMPTY = { incomingRequests: [], outgoingRequests: [], pendingChanges: [], collectiveSetup: [], memberWaiting: [] };
 
 /**
  * GET /api/venue/account-links/incoming: the lightweight feed for the dashboard banner. Pending
  * requests received by this venue (each naming the collective proposed with it, if any), pending
- * permission changes awaiting this venue's response, and, for a host, the collectives that have two
- * venues in and nothing bookable on the page yet (Docs/link-and-collective-setup-wizard-plan.md §4).
+ * permission changes awaiting this venue's response, the requests this venue sent that are still
+ * unanswered, and, for a host, the collectives that have two venues in and nothing bookable on the
+ * page yet; for a member, the collectives whose host is still setting the page up
+ * (Docs/link-and-collective-setup-wizard-plan.md §4).
  */
 export async function GET() {
   const resolved = await resolveLinkAdmin();
@@ -23,10 +30,12 @@ export async function GET() {
   }
 
   try {
-    const [links, invitationsByHost, collectiveSetup] = await Promise.all([
+    const [links, invitationsByHost, invitationsSent, collectiveSetup, memberWaiting] = await Promise.all([
       loadLinkViewsForVenue(ctx.admin, ctx.venueId),
       loadInvitationsByHost(ctx.admin, ctx.venueId),
+      loadInvitationsSentByHost(ctx.admin, ctx.venueId),
       loadCollectiveSetupNeeds(ctx.admin, ctx.venueId),
+      loadMemberWaiting(ctx.admin, ctx.venueId),
     ]);
     const incomingRequests = links
       .filter((l) => l.status === 'pending' && !l.initiatedByMe)
@@ -39,11 +48,22 @@ export async function GET() {
           collective: invitation ? { id: invitation.id, name: invitation.name } : null,
         };
       });
+    const outgoingRequests = links
+      .filter((l) => l.status === 'pending' && l.initiatedByMe)
+      .map((l) => {
+        const invitation = invitationsSent.get(l.otherVenue.id);
+        return {
+          id: l.id,
+          otherVenueName: l.otherVenue.name,
+          createdAt: l.createdAt,
+          collective: invitation ? { id: invitation.id, name: invitation.name } : null,
+        };
+      });
     const pendingChanges = links
       .filter((l) => l.status === 'accepted' && l.pendingChange && !l.pendingChange.proposedByMe)
       .map((l) => ({ id: l.id, otherVenueName: l.otherVenue.name }));
     return NextResponse.json(
-      { incomingRequests, pendingChanges, collectiveSetup },
+      { incomingRequests, outgoingRequests, pendingChanges, collectiveSetup, memberWaiting },
       { headers: { 'Cache-Control': 'no-store' } },
     );
   } catch (err) {

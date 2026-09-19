@@ -620,6 +620,7 @@ export function LinkSetupWizard({
                 sent.collective
                   ? collectiveCopy('setup.done.next.collective', { venue: sent.venueName, collective: sent.collective.name })
                   : collectiveCopy('setup.done.next.link', { venue: sent.venueName }),
+                collectiveCopy('setup.done.next.watch', { venue: sent.venueName }),
                 collectiveCopy('setup.done.next.where'),
               ].map((line, i) => (
                 <li key={line} className="flex gap-3 rounded-xl border border-slate-200 px-3 py-2">

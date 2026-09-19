@@ -9,7 +9,7 @@ import { CombinedPageManager } from './CombinedPageManager';
 import { JoinCollectiveDialog } from './collective/JoinCollectiveDialog';
 import { CreateCollectiveDialog } from './collective/CreateCollectiveDialog';
 import { CollectiveSetupWizard } from './setup/CollectiveSetupWizard';
-import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
+import { collectiveCopy, formatVenueList } from '@/lib/linked-accounts/collective-copy';
 import { EndedCollectivesList, LeaveCollectiveDialog, ReleaseReviewCard } from './collective/ReleaseReview';
 import type { ReleaseReview } from '@/lib/linked-accounts/replicas/release-review';
 import type { AccountLinkView } from '@/lib/linked-accounts/types';
@@ -53,6 +53,8 @@ export function VenueCollectivesPanel({
   // The host's finish-setting-up wizard, and which collectives the banner feed says still need it.
   const [setupTarget, setSetupTarget] = useState<CollectiveView | null>(null);
   const [setupNeeded, setSetupNeeded] = useState<Set<string>>(new Set());
+  // Collectives this venue has joined whose host is still setting the page up (the member's wait).
+  const [memberWaiting, setMemberWaiting] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -106,8 +108,12 @@ export function VenueCollectivesPanel({
     try {
       const res = await fetch('/api/venue/account-links/incoming');
       if (!res.ok) return;
-      const json = (await res.json()) as { collectiveSetup?: { collectiveId: string }[] };
+      const json = (await res.json()) as {
+        collectiveSetup?: { collectiveId: string }[];
+        memberWaiting?: { collectiveId: string }[];
+      };
       setSetupNeeded(new Set((json.collectiveSetup ?? []).map((c) => c.collectiveId)));
+      setMemberWaiting(new Set((json.memberWaiting ?? []).map((c) => c.collectiveId)));
     } catch {
       /* the row simply does not offer the shortcut */
     }
@@ -248,6 +254,7 @@ export function VenueCollectivesPanel({
               pendingLinkId={pendingLinkByHost[c.hostVenueId] ?? null}
               onReviewLink={onReviewLink}
               setupNeeded={setupNeeded.has(c.id)}
+              memberWaiting={memberWaiting.has(c.id)}
               onSetup={() => {
                 setError(null);
                 setSetupTarget(c);
@@ -359,6 +366,7 @@ function CollectiveRow({
   pendingLinkId,
   onReviewLink,
   setupNeeded,
+  memberWaiting,
   onSetup,
 }: {
   collective: CollectiveView;
@@ -373,11 +381,14 @@ function CollectiveRow({
   onReviewLink?: (linkId: string) => void;
   /** The page has two venues in and nothing bookable yet: offer the guided finish (plan L8). */
   setupNeeded: boolean;
+  /** This venue is a member and the host has not put anything bookable on the page yet. */
+  memberWaiting: boolean;
   onSetup: () => void;
 }) {
   const dissolved = collective.status === 'dissolved';
   const invited = collective.myMembershipStatus === 'invited';
   const hostName = collective.members.find((m) => m.venueId === collective.hostVenueId)?.venueName ?? 'the host';
+  const invitedNames = collective.members.filter((m) => m.status === 'invited').map((m) => m.venueName);
   const isActiveMember = collective.myMembershipStatus === 'active';
   // The address customers actually use: a member venue's own page when the
   // collective adopted it (the manager shows the same), else the dedicated one.
@@ -433,6 +444,16 @@ function CollectiveRow({
             {collective.activeMemberCount === 1 ? 'member' : 'members'}
             {collective.members.length > 0 ? ` · ${collective.members.map((m) => m.venueName).join(', ')}` : ''}
           </p>
+          {!dissolved && collective.isHost && collective.activeMemberCount < 2 && invitedNames.length > 0 ? (
+            <p className="mt-1 text-xs font-medium text-brand-700">
+              {collectiveCopy('la.row.host.waiting', { venueList: formatVenueList(invitedNames, 3) })}
+            </p>
+          ) : null}
+          {!dissolved && !collective.isHost && isActiveMember && memberWaiting ? (
+            <p className="mt-1 text-xs font-medium text-brand-700">
+              {collectiveCopy('la.row.member.waiting', { host: hostName })}
+            </p>
+          ) : null}
           {!dissolved && collective.activeMemberCount >= 2 ? (
             <a
               href={liveUrl}

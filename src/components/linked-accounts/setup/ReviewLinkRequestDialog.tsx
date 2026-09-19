@@ -47,7 +47,7 @@ export interface ReviewOutcome {
   joinError?: string;
 }
 
-type Step = 'request' | JoinStep;
+type Step = 'request' | JoinStep | 'done';
 
 export function ReviewLinkRequestDialog({
   link,
@@ -79,6 +79,8 @@ export function ReviewLinkRequestDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDecline, setConfirmDecline] = useState(false);
+  /** The receipt after accepting: what happened, and what happens next (plan §3.2). */
+  const [done, setDone] = useState<ReviewOutcome | null>(null);
 
   const proposesJoin = Boolean(collective && collective.serviceModel === 'replicas');
 
@@ -152,6 +154,8 @@ export function ReviewLinkRequestDialog({
           : collectiveCopy('respond.done.linked', { venue: other }),
         'success',
       );
+      setDone(outcome);
+      setStep('done');
       onDone(outcome);
     } catch {
       setError('Could not respond. Please check your connection.');
@@ -188,7 +192,13 @@ export function ReviewLinkRequestDialog({
   const prev = steps[index - 1];
   const onCheck = step === 'check';
 
-  const footer = (
+  const footer = done ? (
+    <div className="flex justify-end">
+      <Button type="button" onClick={onClose}>
+        {collectiveCopy('respond.done.close')}
+      </Button>
+    </div>
+  ) : (
     <div className="flex flex-wrap items-center justify-between gap-2">
       <div className="flex flex-wrap gap-2">
         {prev ? (
@@ -236,11 +246,15 @@ export function ReviewLinkRequestDialog({
           if (!open && !busy) onClose();
         }}
         title={
-          proposesJoin && collective
-            ? collectiveCopy('respond.titleWithCollective', { venue: other, collective: collective.name })
-            : collectiveCopy('respond.title', { venue: other })
+          done
+            ? done.joined
+              ? collectiveCopy('respond.done.joined.title', { venue: other, collective: done.collectiveName ?? collectiveName })
+              : collectiveCopy('respond.done.linked.title', { venue: other })
+            : proposesJoin && collective
+              ? collectiveCopy('respond.titleWithCollective', { venue: other, collective: collective.name })
+              : collectiveCopy('respond.title', { venue: other })
         }
-        description={collectiveCopy('respond.step', { n: index + 1, total: steps.length })}
+        description={done ? undefined : collectiveCopy('respond.step', { n: index + 1, total: steps.length })}
         size="lg"
         footer={footer}
       >
@@ -314,6 +328,33 @@ export function ReviewLinkRequestDialog({
             <JoinServicesStep preview={preview} draft={draft} onChange={setDraft} host={host} collective={collectiveName} />
           ) : null}
           {step === 'forms' && preview ? <JoinFormsStep preview={preview} draft={draft} onChange={setDraft} host={host} /> : null}
+
+          {step === 'done' && done ? (
+            <section className="space-y-3">
+              {done.joinError && done.collectiveName ? (
+                <p role="alert" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-950">
+                  {collectiveCopy('respond.done.joinFailed', { venue: other, collective: done.collectiveName, error: done.joinError })}
+                </p>
+              ) : null}
+              <ol className="space-y-2">
+                {(done.joined
+                  ? [
+                      collectiveCopy('respond.done.joined.next.host', { venue: other, collective: done.collectiveName ?? collectiveName }),
+                      collectiveCopy('respond.done.joined.next.own', { collective: done.collectiveName ?? collectiveName }),
+                      collectiveCopy('respond.done.joined.next.calendars', { venue: other }),
+                    ]
+                  : [collectiveCopy('respond.done.linked.next', { venue: other })]
+                ).map((line, i) => (
+                  <li key={line} className="flex gap-3 rounded-xl border border-slate-200 px-3 py-2">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-50 text-xs font-bold text-brand-700">
+                      {i + 1}
+                    </span>
+                    <span>{line}</span>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          ) : null}
 
           {step === 'check' ? (
             <section className="space-y-3">

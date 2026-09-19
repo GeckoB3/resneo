@@ -1202,6 +1202,9 @@ venue's non-appointment calendar entities.
 ### 8.3 Incoming-request banner
 
 **Amended 2026-09-19.** `GET /api/venue/account-links/incoming` also carries `collective` on each request (the invitation that rides on it, derived from the `invited` member row hosted by the requester) and `collectiveSetup[]` for a host whose collective has two venues in and no service with a calendar. The banner says "{venue} wants to link with your venue and start {collective}" and, for the host, "{venue} joined {collective}. Two short steps make your shared booking page live" with **Continue setup**. Both link into the Linked accounts tab with `?review={linkId}` or `?setup={collectiveId}`, which open the right dialog.
+The feed also carries `outgoingRequests[]` (the sender's unanswered requests, naming the collective sent
+with each) and `memberWaiting[]` (collectives a member has joined whose page is not live yet), so both
+sides read what they are waiting for, on the banner and on the collective's row.
 
 Persistent across dashboard pages until actioned, shown only to Admins:
 

@@ -68,6 +68,11 @@ Calls: `POST /collectives/{id}/bulk` with `offer` ops, then with `assign` ops (L
 - `incomingRequests[].collective: { id, name } | null` (L11), so the line names the collective;
 - `collectiveSetup[]`: `{ collectiveId, name, memberNames }` for a host whose collective has two active venues and no service with a calendar (L8).
 
+- `outgoingRequests[]`: the venue's own unanswered requests, each naming the collective sent with it, so the sender reads "Waiting for {venue} to review your link request and join {collective}. Once they accept, Continue setup appears here" (added 2026-09-19 after the owner's test run);
+- `memberWaiting[]`: the collectives the venue has joined whose page is not live yet, so a member reads "{host} is setting up the services and the shared booking page, so nothing is needed from you yet".
+
+The same two states show as a line on the collective's row in the Linked accounts tab (`la.row.host.waiting`, `la.row.member.waiting`) and on the sent request's row (`la.sent.collective`), and the review dialog ends on a receipt that says what happens next instead of closing (`respond.done.*`).
+
 Dismissal stays local and 24 hours, as before.
 
 ## 5. Copy

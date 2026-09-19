@@ -78,6 +78,21 @@ function hostTodos(input: CollectiveTodoInput, onPage: CollectiveTodoService[]):
     }
   }
 
+  // A venue asked whether to use its own same-named service (plan L13): its copy exists only once
+  // it answers, so its calendars cannot be chosen yet. Said here, because nothing else on the host's
+  // side would otherwise explain why the venue is missing from the service's calendars.
+  for (const service of onPage) {
+    const itemId = service.collective?.item_id;
+    if (!itemId) continue;
+    for (const group of groups) {
+      if (group.is_host || !(group.awaiting_answer ?? []).includes(itemId)) continue;
+      todos.push({
+        id: `awaiting-${group.venue_id}-${service.id}`,
+        text: collectiveCopy('ov.todo.awaiting', { venue: group.venue_name, service: service.name }),
+      });
+    }
+  }
+
   // A venue that has joined and offers nothing yet: one row, not one per service.
   for (const group of groups) {
     if (group.is_host) continue;

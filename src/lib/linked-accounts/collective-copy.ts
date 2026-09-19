@@ -168,6 +168,7 @@ export const COLLECTIVE_COPY = {
   // "What needs you" (collective-todos.ts)
   'ov.todo.heading': 'What needs you',
   'ov.todo.noCalendars': '{service} is on the page but no calendar offers it, so guests cannot book it.',
+  'ov.todo.awaiting': '{venue} has been asked whether to use its own {service} for the one on the page. Its calendars can be chosen once it answers.',
   'ov.todo.newVenue': '{venue} has joined. Choose their calendars on {count} services.',
   'ov.todo.newVenueOne': '{venue} has joined. Choose their calendars on {count} service.',
   'ov.todo.failed': '{count} services could not be updated at {venue}.',

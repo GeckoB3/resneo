@@ -204,3 +204,26 @@ describe('the strip itself', () => {
     expect(todos).toHaveLength(5);
   });
 });
+
+describe('a member asked about a same-named service (plan L13)', () => {
+  it('tells the host who has still to answer, and about which service', () => {
+    const sync = { venues: 1, applied: 1, pending: [], failed: [] };
+    const todos = buildCollectiveTodos({
+      isHost: true,
+      services: [
+        {
+          id: 's-1',
+          name: 'Beard Trim',
+          collective: { role: 'master', item_id: 'i-1', status: 'up_to_date' } as never,
+        },
+      ],
+      calendarGroups: [
+        { venue_id: 'host', venue_name: 'Zen', is_host: true, sync, calendars: [{ id: 'c-1', name: 'Alex', is_active: true, assigned: [{ item_id: 'i-1' } as never] }] },
+        { venue_id: 'bloom', venue_name: 'Bloom', is_host: false, sync, calendars: [], awaiting_answer: ['i-1'] },
+      ],
+    });
+    expect(todos.map((t) => t.text)).toContain(
+      'Bloom has been asked whether to use its own Beard Trim for the one on the page. Its calendars can be chosen once it answers.',
+    );
+  });
+});

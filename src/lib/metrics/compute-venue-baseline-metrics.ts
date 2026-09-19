@@ -5,9 +5,23 @@ import {
   type BookingModificationActor,
 } from '@/lib/booking/log-booking-modified-event';
 import type { VenueBaselineMetrics } from '@/lib/metrics/baseline-metrics-types';
+import { countNoShowOutcomes } from '@/lib/reports/no-show-series';
+import { selectAllPages } from '@/lib/reports/select-all-pages';
 
 const APPOINTMENT_MODELS = new Set(['practitioner_appointment', 'unified_scheduling']);
 const MODIFICATION_MESSAGE_TYPES = ['booking_modification_email', 'booking_modification_sms'] as const;
+
+type BaselineBookingRow = Parameters<typeof inferBookingRowModel>[0] & {
+  id: string;
+  guest_id: string | null;
+  status: string | null;
+  source: string | null;
+  booking_date: string | null;
+  group_booking_id: string | null;
+  person_label: string | null;
+  created_at: string;
+  updated_at: string | null;
+};
 
 function median(values: number[]): number | null {
   if (values.length === 0) return null;
@@ -52,29 +66,35 @@ export async function computeVenueBaselineMetrics(
   const periodStartIso = `${from}T00:00:00.000Z`;
   const periodEndIso = `${to}T23:59:59.999Z`;
 
-  const { data: bookingRows, error: bookingsErr } = await admin
-    .from('bookings')
-    .select(
-      'id, guest_id, status, source, booking_date, booking_model, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id, created_at, updated_at',
-    )
-    .eq('venue_id', venueId)
-    .gte('booking_date', from)
-    .lte('booking_date', to);
-
-  if (bookingsErr) {
-    console.error('[baseline-metrics] bookings query failed:', bookingsErr.message, { venueId, from, to });
+  let bookingRows: BaselineBookingRow[];
+  try {
+    // Every page: a busy venue has more than PostgREST's 1,000 rows in a quarter.
+    bookingRows = await selectAllPages<BaselineBookingRow>((a, b) =>
+      admin
+        .from('bookings')
+        .select(
+          'id, guest_id, status, source, booking_date, booking_model, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id, group_booking_id, person_label, created_at, updated_at',
+        )
+        .eq('venue_id', venueId)
+        .gte('booking_date', from)
+        .lte('booking_date', to)
+        .order('booking_date', { ascending: true })
+        .order('id', { ascending: true })
+        .range(a, b),
+    );
+  } catch (bookingsErr) {
+    console.error('[baseline-metrics] bookings query failed:', (bookingsErr as Error).message, { venueId, from, to });
     throw new Error('Failed to load bookings for baseline metrics');
   }
 
-  const scopedBookings = (bookingRows ?? []).filter((r) =>
+  const scopedBookings = bookingRows.filter((r) =>
     appointmentsOnly ? isAppointmentRow(r) : true,
   );
   const scopedBookingIds = new Set(scopedBookings.map((r) => r.id as string));
 
-  const nonWalkIn = scopedBookings.filter((r) => r.source !== 'walk-in');
-  const noShowCount = nonWalkIn.filter((r) => r.status === 'No-Show').length;
-  const eligibleStatuses = new Set(['No-Show', 'Seated', 'Completed']);
-  const eligibleCount = nonWalkIn.filter((r) => eligibleStatuses.has(String(r.status))).length;
+  // The same rule as the No-show rate card, so the two agree: by appointment
+  // date, a visit once per day, walk-ins left out.
+  const { no_show_count: noShowCount, eligible_count: eligibleCount } = countNoShowOutcomes(scopedBookings);
 
   const [{ data: modEvents, error: modErr }, { data: staffFlowEvents, error: staffFlowErr }] =
     await Promise.all([

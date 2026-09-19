@@ -154,23 +154,26 @@ function CommsEditorSvg() {
 
 function ReportsDashboardSvg() {
   const bars = [22, 38, 30, 52, 44, 60, 48];
-  const baseY = 318;
-  const maxH = 70;
+  // Below the stat tiles (which end at y 286) and inside the card (which ends at y 368).
+  const baseY = 356;
+  const maxH = 56;
   return (
     <svg
       viewBox="0 0 560 470"
       className="mx-auto h-auto w-full max-w-[560px]"
       role="img"
-      aria-label="The Settings, Reports overview screen: a page header with Overview and Clients tabs, a Date range card with From and To inputs and an Apply button, an Appointment activity report card with three stat tiles and a bar chart and an Export CSV button, and a hinted No-show rate card below."
+      aria-label="The Settings, Reports overview screen: a page header with Overview, New bookings, Revenue and Clients tabs, a Date range card with From and To inputs and an Apply button, an Appointment activity report card with three stat tiles and a bar chart and an Export CSV button, and a hinted No-show rate card below."
     >
       {/* Page header */}
       <text x="14" y="26" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.08em">INSIGHTS</text>
       <text x="14" y="50" fill="#0f172a" fontSize="22" fontWeight="700">Reports</text>
       {/* Tabs */}
-      <rect x="372" y="22" width="174" height="32" rx="9" fill="#f1f5f9" />
-      <rect x="377" y="27" width="84" height="22" rx="7" fill="#ffffff" stroke="#e2e8f0" />
-      <text x="419" y="42" textAnchor="middle" fill="#00305C" fontSize="11" fontWeight="700">Overview</text>
-      <text x="503" y="42" textAnchor="middle" fill="#64748b" fontSize="11" fontWeight="500">Clients</text>
+      <rect x="224" y="22" width="322" height="32" rx="9" fill="#f1f5f9" />
+      <rect x="229" y="27" width="76" height="22" rx="7" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="267" y="42" textAnchor="middle" fill="#00305C" fontSize="11" fontWeight="700">Overview</text>
+      <text x="356" y="42" textAnchor="middle" fill="#64748b" fontSize="11" fontWeight="500">New bookings</text>
+      <text x="442" y="42" textAnchor="middle" fill="#64748b" fontSize="11" fontWeight="500">Revenue</text>
+      <text x="511" y="42" textAnchor="middle" fill="#64748b" fontSize="11" fontWeight="500">Clients</text>
 
       {/* Date range card */}
       <rect x="10" y="68" width="540" height="78" rx="14" fill="#ffffff" stroke="#e2e8f0" />
@@ -201,11 +204,11 @@ function ReportsDashboardSvg() {
 
       <rect x="201" y="222" width="158" height="64" rx="11" fill="#f8fafc" stroke="#e2e8f0" />
       <text x="215" y="244" fill="#64748b" fontSize="9" fontWeight="600">Client places booked</text>
-      <text x="215" y="272" fill="#0f172a" fontSize="20" fontWeight="700">214</text>
+      <text x="215" y="272" fill="#0f172a" fontSize="20" fontWeight="700">136</text>
 
       <rect x="372" y="222" width="158" height="64" rx="11" fill="#ffffff" stroke="#059669" />
       <text x="386" y="244" fill="#059669" fontSize="9" fontWeight="700">Clients seen</text>
-      <text x="386" y="272" fill="#059669" fontSize="20" fontWeight="700">189</text>
+      <text x="386" y="272" fill="#059669" fontSize="20" fontWeight="700">97</text>
 
       {/* Bar chart */}
       <line x1="30" y1={baseY} x2="530" y2={baseY} stroke="#e2e8f0" strokeWidth="1" />
@@ -551,9 +554,123 @@ function CollectiveModelSvg() {
   );
 }
 
+function ReportsNewBookingsSvg() {
+  const chips: Array<[string, number, boolean]> = [
+    ['Today', 38, false],
+    ['Yesterday', 58, false],
+    ['This week', 58, true],
+    ['Last week', 58, false],
+    ['This month', 64, false],
+    ['Last month', 64, false],
+    ['Custom range', 74, false],
+  ];
+  const grains: Array<[string, number, boolean]> = [
+    ['Day', 34, true],
+    ['Week', 40, false],
+    ['Month', 46, false],
+  ];
+  const tiles: Array<[string, string, string, boolean]> = [
+    ['54', '5 since cancelled', 'NEW BOOKINGS', true],
+    ['35', '65% of new bookings', 'ONLINE', false],
+    ['15', '28% of new bookings', 'BY YOUR TEAM', false],
+    ['4', '7% of new bookings', 'WALK-INS', false],
+  ];
+  // Online, by your team, walk-ins, per day.
+  const days: Array<[string, number, number, number]> = [
+    ['14 Sept', 3, 2, 1],
+    ['15 Sept', 8, 3, 0],
+    ['16 Sept', 6, 3, 1],
+    ['17 Sept', 5, 1, 1],
+    ['18 Sept', 7, 3, 1],
+    ['19 Sept', 6, 3, 0],
+  ];
+  const baseY = 430;
+  const perBooking = 11;
+  const row = (items: Array<[string, number, boolean]>, x0: number, y: number) => {
+    let x = x0;
+    return items.map(([label, w, active]) => {
+      const g = (
+        <g key={label}>
+          <rect x={x} y={y} width={w} height="20" rx="7" fill={active ? '#00305C' : '#ffffff'} stroke={active ? '#00305C' : '#e2e8f0'} />
+          <text x={x + w / 2} y={y + 14} textAnchor="middle" fill={active ? '#ffffff' : '#475569'} fontSize="9" fontWeight="600">{label}</text>
+        </g>
+      );
+      x += w + 6;
+      return g;
+    });
+  };
+  return (
+    <svg
+      viewBox="0 0 560 480"
+      className="mx-auto h-auto w-full max-w-[560px]"
+      role="img"
+      aria-label="The Settings, Reports, New bookings tab. Range chips run Today, Yesterday, This week (selected), Last week, This month, Last month and Custom range, with Show by Day selected. The report card is titled New bookings, 14 Sept to 19 Sept 2026, with an Export CSV button. Four tiles read 54 new bookings with 5 since cancelled, 35 online, 15 by your team and 4 walk-ins, the last three each with their share. Below, a stacked bar chart splits each day's bookings into online, by your team and walk-ins."
+    >
+      {/* Page header */}
+      <text x="14" y="26" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.08em">INSIGHTS</text>
+      <text x="14" y="50" fill="#0f172a" fontSize="22" fontWeight="700">Reports</text>
+      <rect x="224" y="22" width="322" height="32" rx="9" fill="#f1f5f9" />
+      <rect x="310" y="27" width="92" height="22" rx="7" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="267" y="42" textAnchor="middle" fill="#64748b" fontSize="11" fontWeight="500">Overview</text>
+      <text x="356" y="42" textAnchor="middle" fill="#00305C" fontSize="11" fontWeight="700">New bookings</text>
+      <text x="442" y="42" textAnchor="middle" fill="#64748b" fontSize="11" fontWeight="500">Revenue</text>
+      <text x="511" y="42" textAnchor="middle" fill="#64748b" fontSize="11" fontWeight="500">Clients</text>
+
+      {/* Range and grain */}
+      <rect x="10" y="66" width="540" height="92" rx="14" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="30" y="88" fill="#94a3b8" fontSize="8" fontWeight="700" letterSpacing="0.06em">RANGE</text>
+      {row(chips, 30, 94)}
+      <text x="30" y="138" fill="#94a3b8" fontSize="8" fontWeight="700" letterSpacing="0.06em">SHOW BY</text>
+      {row(grains, 76, 124)}
+
+      {/* Report card */}
+      <rect x="10" y="170" width="540" height="302" rx="14" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="30" y="194" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.06em">REPORT</text>
+      <text x="30" y="214" fill="#0f172a" fontSize="14" fontWeight="700">New bookings, 14 Sept to 19 Sept 2026</text>
+      <text x="530" y="214" textAnchor="end" fill="#00305C" fontSize="11" fontWeight="600">Export CSV</text>
+
+      {tiles.map(([value, sub, label, brand], i) => {
+        const x = 30 + i * 127;
+        return (
+          <g key={label}>
+            <rect x={x} y="228" width="118" height="62" rx="10" fill={brand ? '#eef4fa' : '#f8fafc'} stroke={brand ? '#d6e4f0' : '#e2e8f0'} />
+            <text x={x + 12} y="252" fill="#0f172a" fontSize="17" fontWeight="700">{value}</text>
+            <text x={x + 12} y="266" fill="#475569" fontSize="8">{sub}</text>
+            <text x={x + 12} y="281" fill="#64748b" fontSize="7.5" fontWeight="700" letterSpacing="0.05em">{label}</text>
+          </g>
+        );
+      })}
+
+      {/* Stacked bars, one colour per channel */}
+      <line x1="44" y1={baseY} x2="530" y2={baseY} stroke="#e2e8f0" strokeWidth="1" />
+      {days.map(([label, online, team, walkIn], i) => {
+        const x = 64 + i * 78;
+        const hOnline = online * perBooking;
+        const hTeam = team * perBooking;
+        const hWalk = walkIn * perBooking;
+        return (
+          <g key={label}>
+            <rect x={x} y={baseY - hOnline} width="44" height={hOnline} fill="#00B4BA" />
+            <rect x={x} y={baseY - hOnline - hTeam} width="44" height={hTeam} fill="#003B6F" />
+            {hWalk > 0 ? <rect x={x} y={baseY - hOnline - hTeam - hWalk} width="44" height={hWalk} fill="#E9B44C" /> : null}
+            <text x={x + 22} y={baseY + 13} textAnchor="middle" fill="#64748b" fontSize="8.5">{label}</text>
+          </g>
+        );
+      })}
+      <rect x="170" y="456" width="8" height="8" rx="1.5" fill="#00B4BA" />
+      <text x="182" y="463" fill="#475569" fontSize="9">Online</text>
+      <rect x="228" y="456" width="8" height="8" rx="1.5" fill="#003B6F" />
+      <text x="240" y="463" fill="#475569" fontSize="9">By your team</text>
+      <rect x="312" y="456" width="8" height="8" rx="1.5" fill="#E9B44C" />
+      <text x="324" y="463" fill="#475569" fontSize="9">Walk-ins</text>
+    </svg>
+  );
+}
+
 export const GROW_FIGURES: Record<string, { title: string; caption: string; node: ReactNode }> = {
   "comms-lanes": { title: "Settings, Communications", caption: "Each guest message sits in its own card with an on/off switch, channel checkboxes, and a timing field where relevant.", node: <CommsLanesSvg /> },
   "comms-editor": { title: "Optional message editor and preview", caption: "Each active message has optional email and SMS text boxes with a character count and a Preview button.", node: <CommsEditorSvg /> },
+  "reports-new-bookings": { title: "Settings then Reports (New bookings)", caption: "Pick a range and how to group it, then read the total, how the bookings came in, and the chart underneath. Figures shown are examples.", node: <ReportsNewBookingsSvg /> },
   "reports-dashboard": { title: "Settings then Reports (Overview)", caption: "The Reports overview with a date range control, stat tiles, a chart, and per-report Export CSV buttons.", node: <ReportsDashboardSvg /> },
   "import-flow": { title: "The import wizard, step by step", caption: "The six wizard steps in order, with a note that the whole import can be undone for 24 hours.", node: <ImportFlowSvg /> },
   "import-mapping": { title: "Map columns", caption: "Your spreadsheet column headers on the left matched to ResNeo fields on the right.", node: <ImportMappingSvg /> },

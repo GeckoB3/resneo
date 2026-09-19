@@ -13,6 +13,11 @@ import { normalizeBookingLogEmailConfig } from '@/lib/reports/booking-log-email-
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { computeVenueBaselineMetrics } from '@/lib/metrics/compute-venue-baseline-metrics';
 import type { VenueBaselineMetrics } from '@/lib/metrics/baseline-metrics-types';
+import { getVenueLocalDateAndMinutes } from '@/lib/venue/venue-local-clock';
+import { addDaysYmd } from '@/lib/reports/report-periods';
+import { localDayWindowUtc } from '@/lib/reports/new-bookings';
+import { buildOverviewBookingReports } from '@/lib/reports/overview-bookings';
+import { loadNoShowSeries } from '@/lib/reports/no-show-series';
 
 export interface ReportByBookingModelRow {
   booking_model: BookingModel;
@@ -566,7 +571,10 @@ async function buildAppointmentInsights(
 
 /**
  * GET /api/venue/reports?from=YYYY-MM-DD&to=YYYY-MM-DD
- * Returns report payloads for the authenticated venue (events as source of truth where applicable).
+ * Returns report payloads for the authenticated venue. Dates are the venue's own
+ * days. `report1_booking_summary` and `report3_cancellation` count the bookings
+ * made in the range exactly as the New bookings tab does (overview-bookings.ts);
+ * `report2_no_show_series` is by appointment date (no-show-series.ts).
  */
 export async function GET(request: NextRequest) {
   try {
@@ -584,39 +592,43 @@ export async function GET(request: NextRequest) {
     const fromStr = fromParam && /^\d{4}-\d{2}-\d{2}$/.test(fromParam) ? fromParam : null;
     const toStr = toParam && /^\d{4}-\d{2}-\d{2}$/.test(toParam) ? toParam : null;
 
-    const now = new Date();
-    const defaultTo = new Date(now);
-    const defaultFrom = new Date(now);
-    defaultFrom.setDate(defaultFrom.getDate() - 7);
-    const from = fromStr ?? defaultFrom.toISOString().slice(0, 10);
-    const to = toStr ?? defaultTo.toISOString().slice(0, 10);
-    const pStart = `${from}T00:00:00.000Z`;
-    const pEnd = `${to}T23:59:59.999Z`;
+    const { data: venueFlags } = await staff.db
+      .from('venues')
+      .select('table_management_enabled, booking_model, pricing_tier, enabled_models, daily_booking_log_email_config, timezone')
+      .eq('id', staff.venue_id)
+      .single();
+    const venueTimezone = (venueFlags as { timezone?: string | null } | null)?.timezone;
+    const timeZone = typeof venueTimezone === 'string' && venueTimezone.trim() ? venueTimezone.trim() : 'Europe/London';
+    const today = getVenueLocalDateAndMinutes(timeZone).dateYmd;
+    const from = fromStr ?? addDaysYmd(today, -7);
+    const to = toStr ?? today;
+    // The instants bounding the venue's own days `from` to `to`, as on the New bookings tab.
+    const { startIso: pStart, endIso: pEnd } = localDayWindowUtc(from, to, timeZone);
+
+    // Bookings made in the range (Appointment activity, Cancellation rate) and
+    // no-shows by appointment date, read from the bookings themselves.
+    const bookingFigures = Promise.all([
+      buildOverviewBookingReports(staff.db, { venueId: staff.venue_id, timeZone, from, to }),
+      loadNoShowSeries(staff.db, { venueId: staff.venue_id, from, to }),
+    ]).then(
+      ([overview, noShowSeries]) => ({ overview, noShowSeries, error: null }),
+      (error: unknown) => ({ overview: null, noShowSeries: null, error }),
+    );
 
     const [
-      { data: summary, error: e1 },
-      { data: noShowSeries, error: e2 },
-      { data: cancellation, error: e3 },
+      { overview, noShowSeries, error: eBookings },
       { data: deposit, error: e4 },
-      { data: venueFlags },
       { data: clientSummaryRaw, error: eClient },
       { data: firstAdmin },
     ] = await Promise.all([
-      // These four are SECURITY DEFINER and take a caller-supplied p_venue_id with
-      // no authorisation check of their own, so they must not be reachable by the
-      // client roles. They run on staff.db (service_role) for the same reason
-      // report_client_summary below does. This route is their only caller, so the
-      // follow-up migration revokes EXECUTE from anon and authenticated. Venue
-      // scoping comes from staff.venue_id above, gated by requireAdmin.
-      staff.db.rpc('report_booking_summary', { p_venue_id: staff.venue_id, p_start: pStart, p_end: pEnd }),
-      staff.db.rpc('report_no_show_series', { p_venue_id: staff.venue_id, p_start: pStart, p_end: pEnd, p_granularity: 'day' }),
-      staff.db.rpc('report_cancellation', { p_venue_id: staff.venue_id, p_start: pStart, p_end: pEnd }),
+      bookingFigures,
+      // report_deposit_summary is SECURITY DEFINER and takes a caller-supplied
+      // p_venue_id with no authorisation check of its own, so it must not be
+      // reachable by the client roles. It runs on staff.db (service_role) for the
+      // same reason report_client_summary below does; EXECUTE is revoked from anon
+      // and authenticated. Venue scoping comes from staff.venue_id above, gated by
+      // requireAdmin.
       staff.db.rpc('report_deposit_summary', { p_venue_id: staff.venue_id, p_start: pStart, p_end: pEnd }),
-      staff.db
-        .from('venues')
-        .select('table_management_enabled, booking_model, pricing_tier, enabled_models, daily_booking_log_email_config')
-        .eq('id', staff.venue_id)
-        .single(),
       staff.db.rpc('report_client_summary', {
         p_venue_id: staff.venue_id,
         p_from: from,
@@ -632,8 +644,8 @@ export async function GET(request: NextRequest) {
         .maybeSingle(),
     ]);
 
-    if (e1 || e2 || e3 || e4) {
-      console.error('reports rpc errors:', e1, e2, e3, e4);
+    if (eBookings || e4 || !overview || !noShowSeries) {
+      console.error('reports load errors:', eBookings, e4);
       return NextResponse.json({ error: 'Failed to load reports' }, { status: 500 });
     }
 
@@ -677,8 +689,6 @@ export async function GET(request: NextRequest) {
     );
     const appointmentDashboard = isAppointmentDashboardExperience(pricingTier, bookingModel, enabledModelsNorm);
 
-    const summaryObj = Array.isArray(summary) ? summary[0] : summary;
-    const cancellationObj = Array.isArray(cancellation) ? cancellation[0] : cancellation;
     const depositObj = Array.isArray(deposit) ? deposit[0] : deposit;
     let tableUtilisation: Array<{ table_id: string; table_name: string; utilisation_pct: number; occupied_hours: number; available_hours: number }> = [];
 
@@ -789,9 +799,9 @@ export async function GET(request: NextRequest) {
       pricing_tier: pricingTier ?? null,
       enabled_models: enabledModelsNorm,
       table_management_enabled: venueFlags?.table_management_enabled ?? false,
-      report1_booking_summary: summaryObj ?? null,
-      report2_no_show_series: noShowSeries ?? [],
-      report3_cancellation: cancellationObj ?? null,
+      report1_booking_summary: overview.activity,
+      report2_no_show_series: noShowSeries,
+      report3_cancellation: overview.cancellation,
       report4_deposit: depositObj ?? null,
       report5_table_utilisation: tableUtilisation,
       report7_appointment_insights: report7_appointment_insights,

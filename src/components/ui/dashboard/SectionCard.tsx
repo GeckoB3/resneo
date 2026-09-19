@@ -28,6 +28,7 @@ function SectionCardHeader({
   right,
   eyebrowClassName,
   titleClassName,
+  rightClassName = '',
 }: {
   eyebrow?: string;
   title?: string;
@@ -35,6 +36,8 @@ function SectionCardHeader({
   right?: ReactNode;
   eyebrowClassName?: string;
   titleClassName?: string;
+  /** Extra classes for the `right` slot, e.g. `sm:shrink-0` so a tab row is never squeezed onto two lines. */
+  rightClassName?: string;
 }) {
   if (!eyebrow && !title && !description && !right) return null;
   return (
@@ -63,7 +66,9 @@ function SectionCardHeader({
         {description ? <p className="mt-1 break-words text-sm text-slate-600">{description}</p> : null}
       </div>
       {right ? (
-        <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+        <div
+          className={`flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end ${rightClassName}`}
+        >
           {right}
         </div>
       ) : null}

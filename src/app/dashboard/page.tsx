@@ -51,6 +51,7 @@ export default async function DashboardHomePage() {
         setupStatusFromServer={setupStatusFromServer}
         disableClientSetupFetch
         venueId={staff.venue_id}
+        isAdmin={staff.role === 'admin'}
       />
     </>
   );

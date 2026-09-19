@@ -7,7 +7,9 @@ import { DataExportSection } from './DataExportSection';
 import { ClientsSection, type ClientSummary } from './ClientsSection';
 import { BaselineMetricsSection } from './BaselineMetricsSection';
 import { BookedRevenueSection } from './BookedRevenueSection';
+import { NewBookingsSection } from './NewBookingsSection';
 import type { VenueBaselineMetrics } from '@/lib/metrics/baseline-metrics-types';
+import { NEW_BOOKING_CHANNELS, NEW_BOOKING_CHANNEL_LABELS, type NewBookingChannel } from '@/lib/reports/new-bookings';
 import type { BookingModel, VenueTerminology } from '@/types/booking-models';
 import { bookingStatusDisplayLabel } from '@/lib/booking/infer-booking-row-model';
 import { isAppointmentDashboardExperience, isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
@@ -20,9 +22,16 @@ import { StatTile } from '@/components/ui/dashboard/StatTile';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { DashboardChartSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 
+/**
+ * Bookings made in the range, counted as the New bookings tab counts them
+ * (src/lib/reports/overview-bookings.ts). `by_status.Pending` is the bookings
+ * still waiting for payment, which are not in the total.
+ */
 interface Report1 {
   total_bookings_created: number;
   by_source: Record<string, number>;
+  /** The New bookings tab's channels. Absent from servers before 2026-09-19. */
+  by_channel?: Partial<Record<NewBookingChannel, number>>;
   by_status: Record<string, number>;
   covers_booked: number;
   covers_seated: number;
@@ -35,9 +44,13 @@ interface Report2Row {
   rate_pct: number;
 }
 
+/** Of the bookings made in the range, how many have since been cancelled, and by whom. */
 interface Report3 {
   total_bookings_created: number;
   cancelled_guest_initiated: number;
+  /** Absent from servers before 2026-09-19. */
+  cancelled_team_initiated?: number;
+  /** System cancellations for non-payment, made in the range. Not in the total or the rate. */
   cancelled_auto: number;
   cancellation_rate_pct: number;
 }
@@ -259,6 +272,14 @@ function aggregateBookingSourcesByLabel(bySource: Record<string, number>): Array
     .sort((a, b) => b.value - a.value);
 }
 
+/** How the bookings made in the range came in, in the New bookings tab's words (pie + CSV). */
+function bookingsMadeByChannel(r: Report1): Array<{ name: string; value: number }> {
+  if (!r.by_channel) return aggregateBookingSourcesByLabel(r.by_source);
+  return NEW_BOOKING_CHANNELS.map((c) => ({ name: NEW_BOOKING_CHANNEL_LABELS[c], value: r.by_channel?.[c] ?? 0 }))
+    .filter((row) => row.value > 0)
+    .sort((a, b) => b.value - a.value);
+}
+
 async function fetchReportsJson(url: string): Promise<ReportsData> {
   const res = await fetch(url);
   if (!res.ok) throw new Error('Failed to load');
@@ -273,7 +294,7 @@ function normalizeLogConfig(config: BookingLogEmailConfig | null | undefined, fa
   };
 }
 
-type ReportsSubTab = 'overview' | 'revenue' | 'clients';
+type ReportsSubTab = 'overview' | 'new-bookings' | 'revenue' | 'clients';
 
 export interface ReportsViewProps {
   bookingModel: BookingModel;
@@ -329,10 +350,16 @@ export function ReportsView({
   const [exportFlash, setExportFlash] = useState<ExportFlash | null>(null);
   const subTabParam = searchParams.get(subTabQueryKey);
   const activeTab: ReportsSubTab =
-    subTabParam === 'clients' ? 'clients' : subTabParam === 'revenue' ? 'revenue' : 'overview';
-  const recharts = useDeferredRecharts(
-    (activeTab === 'overview' && Boolean(data)) || activeTab === 'revenue',
-  );
+    subTabParam === 'clients'
+      ? 'clients'
+      : subTabParam === 'revenue'
+        ? 'revenue'
+        : subTabParam === 'new-bookings'
+          ? 'new-bookings'
+          : 'overview';
+  // Revenue and New bookings pick their own dates, so they ignore the Date range card.
+  const ownRangeTab = activeTab === 'revenue' || activeTab === 'new-bookings';
+  const recharts = useDeferredRecharts((activeTab === 'overview' && Boolean(data)) || ownRangeTab);
 
   const setActiveTab = useCallback(
     (tab: ReportsSubTab) => {
@@ -376,6 +403,7 @@ export function ReportsView({
         appt ? `${terminology.booking}s created in period` : 'Total bookings created',
         String(r.total_bookings_created),
       ],
+      ['Waiting for payment (not in the total)', String(r.by_status.Pending ?? 0)],
       [
         appt
           ? `Total ${terminology.client.toLowerCase()} places booked (headcount)`
@@ -388,8 +416,8 @@ export function ReportsView({
           : 'Covers seated',
         String(r.covers_seated),
       ],
-      ['By source (created)', ''],
-      ...aggregateBookingSourcesByLabel(r.by_source).map(({ name, value }) => [name, String(value)]),
+      ['How they booked', ''],
+      ...bookingsMadeByChannel(r).map(({ name, value }) => [name, String(value)]),
       ['By status', ''],
       ...Object.entries(r.by_status).map(([k, v]) => [
         appt ? bookingStatusDisplayLabel(k, false) : k,
@@ -407,8 +435,8 @@ export function ReportsView({
       data.enabled_models ?? null,
     );
     const headerRow = appt
-      ? ['Date', 'No-shows', 'Attended or no-show (count)', 'Rate %']
-      : ['Date', 'No-shows', 'Denominator', 'Rate %'];
+      ? ['Appointment date', 'No-shows', 'Attended or no-show (count)', 'Rate %']
+      : ['Date', 'No-shows', 'Attended or no-show (count)', 'Rate %'];
     downloadCsv(`report2-no-show-rate-${data.from}-${data.to}.csv`, [
       headerRow,
       ...data.report2_no_show_series.map((row) => [row.period_start, String(row.no_show_count), String(row.confirmed_at_time_count), String(row.rate_pct)]),
@@ -436,8 +464,9 @@ export function ReportsView({
           : 'Cancelled (guest-initiated)',
         String(r.cancelled_guest_initiated),
       ],
-      ['Cancelled (auto)', String(r.cancelled_auto)],
+      ['Cancelled (team-initiated)', String(r.cancelled_team_initiated ?? 0)],
       ['Cancellation rate %', String(r.cancellation_rate_pct)],
+      ['Cancelled automatically, unpaid (not in the rate)', String(r.cancelled_auto)],
     ]);
   }, [data, bookingModel, terminology, pricingTier]);
 
@@ -556,6 +585,7 @@ export function ReportsView({
     () =>
       [
         { id: 'overview' as const, label: 'Overview' },
+        { id: 'new-bookings' as const, label: 'New bookings' },
         { id: 'revenue' as const, label: 'Revenue' },
         { id: 'clients' as const, label: `${terminology.client}s` },
       ] as const,
@@ -602,7 +632,8 @@ export function ReportsView({
   const bookingWord = terminology.booking;
   const staffWord = terminology.staff;
 
-  const sourcePieData = r1?.by_source ? aggregateBookingSourcesByLabel(r1.by_source) : [];
+  const sourcePieData = r1 ? bookingsMadeByChannel(r1) : [];
+  const awaitingPayment = r1?.by_status.Pending ?? 0;
   const statusBarData = r1?.by_status
     ? Object.entries(r1.by_status).map(([status, count]) => ({
         source: appointmentDashboardExperience
@@ -671,7 +702,7 @@ export function ReportsView({
         actions={<TabBar tabs={reportTabs} value={activeTab} onChange={setActiveTab} />}
       />
 
-      {activeTab !== 'revenue' ? (
+      {!ownRangeTab ? (
       <SectionCard elevated>
         <SectionCard.Header eyebrow="Range" title="Date range" />
         <SectionCard.Body className="flex flex-wrap items-center gap-3">
@@ -703,6 +734,10 @@ export function ReportsView({
           </button>
         </SectionCard.Body>
       </SectionCard>
+      ) : null}
+
+      {activeTab === 'new-bookings' ? (
+        <NewBookingsSection recharts={recharts} onExportNotice={notifyExport} />
       ) : null}
 
       {activeTab === 'revenue' ? (
@@ -749,9 +784,10 @@ export function ReportsView({
           <>
             {appointmentDashboardExperience && (
               <p className="mb-4 text-sm text-slate-500">
-                Headcount comes from party size on each {bookingWord.toLowerCase()}: the middle figure is total{' '}
-                <strong>{clientLower} places</strong> booked in range (each person in a group counts once). The
-                right-hand figure is how many of those places reached arrived, started, or completed status.
+                {bookingWord}s made in these dates, each on the day it was made, whatever date it is for. This is the
+                same count as the New bookings tab: a visit with several services counts once. The middle figure
+                counts <strong>{clientLower} places</strong>, so a group of three counts as three. The right-hand
+                figure is how many of those places have arrived, started or completed so far.
               </p>
             )}
             <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -759,6 +795,7 @@ export function ReportsView({
                 label={appointmentDashboardExperience ? `${bookingWord}s created` : `Total ${bookingWord.toLowerCase()}s`}
                 value={String(r1.total_bookings_created)}
                 color={reportMetricColor('teal')}
+                subValue={awaitingPayment > 0 ? `+${awaitingPayment} waiting for payment` : undefined}
               />
               <StatTile
                 label={
@@ -1069,8 +1106,9 @@ export function ReportsView({
       >
         {appointmentDashboardExperience && (
           <p className="mb-3 text-sm text-slate-500">
-            {client}s who confirmed an online {bookingWord.toLowerCase()} but did not attend (walk-ins excluded from
-            the denominator). Use this to track reliability and follow-up.
+            Of the {bookingWord.toLowerCase()}s due in these dates, the share where the {clientLower} did not turn up,
+            by {bookingWord.toLowerCase()} date. Only {bookingWord.toLowerCase()}s marked started, completed or
+            no-show count, and a visit with several services counts once a day. Walk-ins are left out.
           </p>
         )}
         <p className="mb-3 text-sm text-slate-500">
@@ -1108,11 +1146,13 @@ export function ReportsView({
           <>
             {appointmentDashboardExperience && (
               <p className="mb-3 text-sm text-slate-500">
-                Auto (unpaid) counts {bookingWord.toLowerCase()}s that moved from Pending to Cancelled - for example
-                when a required deposit was not completed in time.
+                Of the {bookingWord.toLowerCase()}s made in these dates, the share since cancelled by the{' '}
+                {clientLower} or by your team. Auto (unpaid) counts {bookingWord.toLowerCase()}s the system cancelled
+                because a deposit or card never came through. The {clientLower} never finished booking, so they are
+                not in {bookingWord}s created or the rate.
               </p>
             )}
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
               <StatTile
                 label={appointmentDashboardExperience ? `${bookingWord}s created` : 'Total created'}
                 value={String(r3.total_bookings_created)}
@@ -1123,12 +1163,17 @@ export function ReportsView({
                 value={String(r3.cancelled_guest_initiated)}
                 color={reportMetricColor()}
               />
-              <StatTile label="Auto (unpaid)" value={String(r3.cancelled_auto)} color={reportMetricColor()} />
+              <StatTile
+                label="Team-initiated"
+                value={String(r3.cancelled_team_initiated ?? 0)}
+                color={reportMetricColor()}
+              />
               <StatTile
                 label="Cancellation rate"
                 value={`${r3.cancellation_rate_pct}%`}
                 color={reportMetricColor(r3.cancellation_rate_pct > 10 ? 'red' : 'emerald')}
               />
+              <StatTile label="Auto (unpaid)" value={String(r3.cancelled_auto)} color={reportMetricColor()} />
             </div>
           </>
         )}

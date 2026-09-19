@@ -3,10 +3,10 @@ import type { HelpArticle } from '../../types';
 export const article: HelpArticle = {
   slug: "dashboard-overview",
   helpSection: "gs-start-here",
-  verified: '2026-09-12',
+  verified: '2026-09-19',
   title: "A tour of your dashboard",
   description: "A quick tour of your dashboard sidebar, so you can find any tool in a couple of clicks.",
-  tags: ["dashboard","navigation","sidebar","roles","admin","staff","home","booking page","ask resneo","help assistant","support"],
+  tags: ["dashboard","navigation","sidebar","roles","admin","staff","home","booking page","ask resneo","help assistant","support","new bookings","bookings taken","bookings made"],
   content: `# A tour of your dashboard
 
 Your dashboard is where you run the business: today's bookings, your calendar, your clients, and every setting. This tour walks the sidebar top to bottom so you always know where to click.
@@ -26,6 +26,7 @@ Your dashboard is where you run the business: today's bookings, your calendar, y
 - Occasional notes in a coloured box: a yellow warning for admins while public bookings are off because no service is active and linked to a calendar, and blue notes for pending appointments awaiting payment or for an empty day tomorrow.
 - **7-day appointments**: a chart of how many appointments are booked on each of the next seven days.
 - **Today's appointments** under the heading **Diary**: every booking for today in time order, with the client's name, its status, and whether a deposit has been paid. Click **View all** for the full list. Only the first ten are listed; a **view all** link at the foot of the card covers the rest.
+- A **New bookings** card: how many bookings you have taken, each counted on the day it was made, whatever date it is for. It reads, for example, "You have had 7 new bookings today", with how they came in underneath: **Online** when your client booked themselves, **By your team** when someone on your team added it, and **Walk-ins**. Switch between **Today**, **This week** (from Monday) and **This month** at the top of the card. A visit with several services counts once, and a line underneath says how many have since been cancelled or are still waiting for a deposit or card. Admins also get a link to the full breakdown in **Reports**.
 
 If today is empty you will see "No appointments today". That is normal on your first day. If you signed up with a referral code, a green note at the top of Home reads **Your referral month is active** while your extended trial runs.
 

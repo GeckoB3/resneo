@@ -4,6 +4,7 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import useSWR from 'swr';
 import { SetupChecklist } from './SetupChecklist';
+import { NewBookingsCard } from './NewBookingsCard';
 import { DashboardStatCard } from '@/components/dashboard/DashboardStatCard';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { PageFrame } from '@/components/ui/dashboard/PageFrame';
@@ -143,12 +144,15 @@ export function DashboardHomeClient({
   setupStatusFromServer,
   disableClientSetupFetch,
   venueId,
+  isAdmin = false,
 }: {
   initialData: DashboardHomePayload;
   setupStatusFromServer: SetupStatus | null;
   /** When true, checklist uses server payload and does not call /api/venue/setup-status on mount. */
   disableClientSetupFetch: boolean;
   venueId: string;
+  /** Admins also get links through to admin-only pages such as Reports. */
+  isAdmin?: boolean;
 }) {
   const { data, error, mutate, isValidating } = useSWR('/api/venue/dashboard-home', fetchDashboardHome, {
     fallbackData: initialData,
@@ -901,6 +905,8 @@ export function DashboardHomeClient({
             </SectionCard.Footer>
           ) : null}
         </SectionCard>
+
+        <NewBookingsCard summary={payload.new_bookings} showReportLink={isAdmin} />
       </div>
     </PageFrame>
   );

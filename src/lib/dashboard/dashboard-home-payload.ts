@@ -27,6 +27,7 @@ import { isAttendanceConfirmed } from '@/lib/booking/booking-staff-indicators';
 import type { VenueStaff } from '@/lib/venue-auth';
 import { formatGuestDisplayName } from '@/lib/guests/name';
 import { collapseMultiServiceVisits } from '@/lib/booking/booking-list-row-schedule';
+import { buildNewBookingsSummary, type NewBookingsSummary } from '@/lib/reports/new-bookings';
 
 const WEEKDAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -183,6 +184,13 @@ export interface DashboardHomePayload {
       bookings: number;
     };
   };
+  /**
+   * Bookings MADE today, this week (from Monday) and this month, on the venue's clock, whatever
+   * date each is for; `today`, `forecast` and the rest count bookings ON a date instead. A visit
+   * counts once; imports, collective move copies and unpaid lapses are left out. See
+   * src/lib/reports/new-bookings.ts. Null when it could not be loaded; absent from older servers.
+   */
+  new_bookings?: NewBookingsSummary | null;
 }
 
 type DashboardBookingOpsRow = {
@@ -555,6 +563,17 @@ export async function buildDashboardHomePayload(
   const { dateStr: todayStrVenue, minutesSinceMidnight: nowMinutes } = nowInVenueTz(tz);
   const weekEndStr = addDaysToDateStr(todayStrVenue, 6);
 
+  // Its own reads, started now so they run beside everything below. A failure costs the
+  // New bookings card, never the page.
+  const newBookingsPromise = buildNewBookingsSummary(admin, {
+    venueId: staff.venue_id,
+    timeZone: tz,
+    today: todayStrVenue,
+  }).catch((err: unknown) => {
+    console.error('[dashboard home] new bookings summary failed:', err);
+    return null;
+  });
+
   const availabilityConfig = venueRow.availability_config as AvailabilityConfig | null;
   const openingHours = venueRow.opening_hours;
   const venueMode = await resolveVenueMode(admin, staff.venue_id);
@@ -778,6 +797,7 @@ export async function buildDashboardHomePayload(
     todayBookings.map((b) => b as DashboardBookingOpsRow),
     activeModelSet,
   );
+  const newBookings = await newBookingsPromise;
 
   return {
     booking_model: venueMode.bookingModel,
@@ -788,6 +808,7 @@ export async function buildDashboardHomePayload(
     table_focus_secondaries_enabled: tableFocusSecondariesEnabled || undefined,
     secondary_booking_activity: secondaryBookingActivity,
     cde_today: cdeToday,
+    new_bookings: newBookings,
     today,
     forecast,
     heatmap,

@@ -429,12 +429,20 @@ function ReportsInsightsSvg() {
       <text x="20" y="120" fill={slateDark} fontSize="14" fontWeight="700">
         Reports
       </text>
-      <rect x="400" y="96" width="100" height="22" rx="8" fill="#f1f5f9" stroke={border} />
-      <text x="450" y="111" textAnchor="middle" fill={slateDark} fontSize="8" fontWeight="700">
+      <rect x="286" y="96" width="72" height="22" rx="8" fill="#f1f5f9" stroke={border} />
+      <text x="322" y="111" textAnchor="middle" fill={slateDark} fontSize="8" fontWeight="700">
         Overview
       </text>
-      <rect x="508" y="96" width="92" height="22" rx="8" fill="white" stroke={border} />
-      <text x="554" y="111" textAnchor="middle" fill={slate} fontSize="8" fontWeight="600">
+      <rect x="364" y="96" width="92" height="22" rx="8" fill="white" stroke={border} />
+      <text x="410" y="111" textAnchor="middle" fill={slate} fontSize="8" fontWeight="600">
+        New bookings
+      </text>
+      <rect x="462" y="96" width="68" height="22" rx="8" fill="white" stroke={border} />
+      <text x="496" y="111" textAnchor="middle" fill={slate} fontSize="8" fontWeight="600">
+        Revenue
+      </text>
+      <rect x="536" y="96" width="64" height="22" rx="8" fill="white" stroke={border} />
+      <text x="568" y="111" textAnchor="middle" fill={slate} fontSize="8" fontWeight="600">
         Clients
       </text>
       <rect x="20" y="130" width="580" height="48" rx="12" fill={white} stroke={border} />

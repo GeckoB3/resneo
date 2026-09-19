@@ -9,8 +9,8 @@ export default async function ReportsPage({
   const sp = await searchParams;
   const qs = new URLSearchParams();
   qs.set('tab', 'reports');
-  if (sp.tab === 'clients') {
-    qs.set('reportsTab', 'clients');
+  if (sp.tab === 'clients' || sp.tab === 'revenue' || sp.tab === 'new-bookings') {
+    qs.set('reportsTab', sp.tab);
   }
   redirect(`/dashboard/settings?${qs.toString()}`);
 }

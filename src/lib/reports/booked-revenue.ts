@@ -3,6 +3,14 @@ import { loadRowTotalResolver, type VisitBookingRow } from '@/lib/booking/paymen
 import { loadAccessibleLinkedVenueIds } from '@/lib/linked-accounts/queries';
 import { findStaffCollectiveForVenue } from '@/lib/linked-accounts/collective-staff-scope';
 import type { LinkGrant } from '@/lib/linked-accounts/types';
+import {
+  addDaysYmd,
+  clampYmd,
+  periodEndFor,
+  periodStartFor,
+  periodStartsBetween,
+  type ReportGrain,
+} from '@/lib/reports/report-periods';
 
 /**
  * Booked revenue by period and by calendar (Settings → Reports → Revenue).
@@ -32,7 +40,10 @@ import type { LinkGrant } from '@/lib/linked-accounts/types';
  * membership ends only the links' own revenue grants apply again (REP-06).
  */
 
-export type BookedRevenueGrain = 'day' | 'week' | 'month';
+export type BookedRevenueGrain = ReportGrain;
+
+/** Still exported from here for existing callers; they now live in report-periods. */
+export { periodStartFor, periodStartsBetween };
 
 export interface BookedRevenueColumn {
   /** Stable key for `by_calendar`: the calendar id, or `unassigned`. */
@@ -151,61 +162,6 @@ function addToCell(cell: BookedRevenueCell, pence: number | null, noShow: boolea
   }
 }
 
-function parseYmd(ymd: string): Date {
-  const [y, m, d] = ymd.split('-').map(Number);
-  return new Date(Date.UTC(y!, m! - 1, d!));
-}
-
-function toYmd(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
-
-function addDays(ymd: string, delta: number): string {
-  const d = parseYmd(ymd);
-  d.setUTCDate(d.getUTCDate() + delta);
-  return toYmd(d);
-}
-
-/**
- * The start of the period a date falls in. Weeks start on Monday; months on
- * the 1st. Pure date arithmetic on the booking's own date, so the venue's
- * timezone never shifts a booking into a neighbouring day.
- */
-export function periodStartFor(ymd: string, grain: BookedRevenueGrain): string {
-  if (grain === 'day') return ymd;
-  const d = parseYmd(ymd);
-  if (grain === 'week') {
-    const dow = d.getUTCDay(); // 0 = Sunday
-    const back = (dow + 6) % 7;
-    d.setUTCDate(d.getUTCDate() - back);
-    return toYmd(d);
-  }
-  d.setUTCDate(1);
-  return toYmd(d);
-}
-
-function periodEndFor(start: string, grain: BookedRevenueGrain): string {
-  if (grain === 'day') return start;
-  if (grain === 'week') return addDays(start, 6);
-  const d = parseYmd(start);
-  d.setUTCMonth(d.getUTCMonth() + 1);
-  d.setUTCDate(0);
-  return toYmd(d);
-}
-
-/** Every period start between `from` and `to`, so quiet periods still appear as zero rows. */
-export function periodStartsBetween(from: string, to: string, grain: BookedRevenueGrain): string[] {
-  const out: string[] = [];
-  let cursor = periodStartFor(from, grain);
-  let guard = 0;
-  while (cursor <= to && guard < 4000) {
-    out.push(cursor);
-    cursor = addDays(periodEndFor(cursor, grain), 1);
-    guard += 1;
-  }
-  return out;
-}
-
 export const BOOKED_REVENUE_PRESETS = ['today', 'this_week', 'this_month', 'last_30', 'next_30'] as const;
 export type BookedRevenuePreset = (typeof BOOKED_REVENUE_PRESETS)[number];
 
@@ -219,23 +175,17 @@ export function resolvePresetRange(preset: BookedRevenuePreset, today: string): 
       return { from: today, to: today };
     case 'this_week': {
       const from = periodStartFor(today, 'week');
-      return { from, to: addDays(from, 6) };
+      return { from, to: addDaysYmd(from, 6) };
     }
     case 'this_month': {
       const from = periodStartFor(today, 'month');
       return { from, to: periodEndFor(from, 'month') };
     }
     case 'last_30':
-      return { from: addDays(today, -29), to: today };
+      return { from: addDaysYmd(today, -29), to: today };
     case 'next_30':
-      return { from: today, to: addDays(today, 29) };
+      return { from: today, to: addDaysYmd(today, 29) };
   }
-}
-
-function clampYmd(value: string, min: string, max: string): string {
-  if (value < min) return min;
-  if (value > max) return max;
-  return value;
 }
 
 /** Pure aggregation, separated from the loads so it can be unit tested. */

@@ -22,7 +22,7 @@ import { GET } from './route';
 const VENUE = 'venue-1';
 const mockStaff = vi.mocked(getVenueStaff);
 
-const venueRow = { id: VENUE, name: 'Sept Salon', timezone: 'Europe/London', currency: 'GBP', booking_model: 'unified_scheduling' };
+const venueRow = { id: VENUE, name: 'Sept Salon', timezone: 'Europe/London', currency: 'GBP', booking_model: 'unified_scheduling', terminology: null };
 
 /** Answers the venue read for every test, then defers to the test's own responder. */
 function withVenue(responder?: Responder): Responder {
@@ -171,13 +171,13 @@ const guests = [
     marketing_consent: true, marketing_consent_at: '2026-01-05T10:00:00Z', marketing_opt_out: false,
     customer_profile_notes: 'Prefers Dana', dietary_preferences: null, source: 'online', visit_count: 3, no_show_count: 1,
     last_visit_date: '2026-09-01', first_booked_at: '2026-01-06T09:00:00Z', last_booked_at: '2026-09-01T09:00:00Z',
-    waiver_signed_at: null, user_id: 'user-1', custom_fields: { allergy: 'Nuts', score: 7 }, created_at: '2026-01-05T10:00:00Z',
+    waiver_signed_at: null, custom_fields: { allergy: 'Nuts', score: 7 }, created_at: '2026-01-05T10:00:00Z',
   },
   {
     id: 'g2', first_name: ' Cher ', last_name: null, email: null, phone: null, address_line1: null, address_line2: null, address_city: null,
     address_postcode: null, tags: [], marketing_consent: false, marketing_consent_at: null, marketing_opt_out: true,
     customer_profile_notes: null, dietary_preferences: null, source: null, visit_count: 0, no_show_count: 0,
-    last_visit_date: null, first_booked_at: null, last_booked_at: null, waiver_signed_at: null, user_id: null,
+    last_visit_date: null, first_booked_at: null, last_booked_at: null, waiver_signed_at: null,
     custom_fields: null, created_at: '2026-08-31T23:30:00Z', // 2026-09-01 00:30 in London
   },
 ];
@@ -427,7 +427,8 @@ describe('GET /api/venue/export?type=contacts', () => {
     expect(ann('Upcoming')).toBe('1');
     expect(ann('Cancelled')).toBe('1');
     expect(ann('Paid deposits (£)')).toBe('25');
-    expect(ann('Has online account')).toBe('Yes');
+    // Booked-at times are venue wall-clock already (the trigger adds date + time), so they are not converted.
+    expect(ann('First booked')).toBe('2026-01-06 09:00');
     expect(ann('Added on')).toBe('2026-01-05 10:00');
     expect(ann('Allergy')).toBe('Nuts');
     expect(ann('Score')).toBe('7');
@@ -438,7 +439,6 @@ describe('GET /api/venue/export?type=contacts', () => {
     expect(cher('Marketing opt-out')).toBe('Yes');
     expect(cher('Total appointments')).toBe('1');
     expect(cher('Upcoming')).toBe('0');
-    expect(cher('Has online account')).toBe('No');
     expect(cher('Allergy')).toBe('');
   });
 

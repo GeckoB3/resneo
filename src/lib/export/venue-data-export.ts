@@ -2,7 +2,9 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { bookingModelShortLabel, inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
 import { loadRowTotalResolver, type VisitBookingRow } from '@/lib/booking/payment-summary';
 import { normaliseGuestNamePart } from '@/lib/guests/name';
+import { mergeVenueTerminology } from '@/lib/dashboard/merge-venue-terminology';
 import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
+import type { BookingModel } from '@/types/booking-models';
 import { selectAllPages } from '@/lib/reports/select-all-pages';
 
 /**
@@ -124,6 +126,19 @@ export function formatInstant(iso: string | null | undefined, timeZone: string):
   }
 }
 
+/**
+ * "2026-09-21 10:00" from a timestamp that already holds venue wall-clock time. The guest
+ * aggregates trigger writes `first_booked_at` and `last_booked_at` as booking_date + booking_time
+ * with no zone, which the column then labels UTC, so converting them would shift every one by
+ * the venue's offset.
+ */
+export function formatWallClock(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString().slice(0, 16).replace('T', ' ');
+}
+
 /** The venue-local calendar day an instant falls on, for range checks on "added on" dates. */
 function ymdOf(iso: string | null | undefined, timeZone: string): string {
   return formatInstant(iso, timeZone).slice(0, 10);
@@ -178,7 +193,7 @@ function titleCase(value: string | null | undefined): string {
 export async function loadExportVenue(db: SupabaseClient, venueId: string): Promise<ExportVenue> {
   const { data, error } = await db
     .from('venues')
-    .select('id, name, timezone, currency, booking_model')
+    .select('id, name, timezone, currency, booking_model, terminology')
     .eq('id', venueId)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -187,15 +202,18 @@ export async function loadExportVenue(db: SupabaseClient, venueId: string): Prom
     timezone?: string | null;
     currency?: string | null;
     booking_model?: string | null;
+    terminology?: unknown;
   };
-  const restaurant = row.booking_model === 'table_reservation';
+  // The venue's own words, as the dashboard shows them (a venue may call appointments bookings).
+  const model: BookingModel = (row.booking_model as BookingModel | null | undefined) ?? 'unified_scheduling';
+  const words = mergeVenueTerminology(model, row.terminology);
   return {
     id: venueId,
     name: row.name?.trim() || 'Your venue',
     timeZone: row.timezone?.trim() || 'Europe/London',
     currencySymbol: currencySymbolFromCode(row.currency),
-    bookingWord: restaurant ? 'Booking' : 'Appointment',
-    clientWord: restaurant ? 'Guest' : 'Client',
+    bookingWord: words.booking,
+    clientWord: words.client,
   };
 }
 
@@ -550,7 +568,7 @@ const GUEST_SELECT = `
   id, first_name, last_name, email, phone, address_line1, address_line2, address_city, address_postcode, tags,
   marketing_consent, marketing_consent_at, marketing_opt_out, customer_profile_notes, dietary_preferences,
   source, visit_count, no_show_count, last_visit_date, first_booked_at, last_booked_at,
-  waiver_signed_at, user_id, custom_fields, created_at
+  waiver_signed_at, custom_fields, created_at
 `;
 
 interface GuestRow {
@@ -576,7 +594,6 @@ interface GuestRow {
   first_booked_at?: string | null;
   last_booked_at?: string | null;
   waiver_signed_at?: string | null;
-  user_id?: string | null;
   custom_fields?: Record<string, unknown> | null;
   created_at?: string | null;
 }
@@ -645,7 +662,6 @@ export async function buildContactsExport(clients: ExportClients, venue: ExportV
     'First booked',
     'Last booked',
     'Waiver signed',
-    'Has online account',
     'Added on',
     ...customFields.map((f) => f.field_name),
   ];
@@ -677,10 +693,9 @@ export async function buildContactsExport(clients: ExportClients, venue: ExportV
       facts ? facts.upcoming(today) : 0,
       facts?.cancelled ?? 0,
       (facts?.paidDepositPence ?? 0) / 100,
-      formatInstant(g.first_booked_at, venue.timeZone),
-      formatInstant(g.last_booked_at, venue.timeZone),
+      formatWallClock(g.first_booked_at),
+      formatWallClock(g.last_booked_at),
       formatInstant(g.waiver_signed_at, venue.timeZone),
-      yesNo(Boolean(g.user_id)),
       formatInstant(g.created_at, venue.timeZone),
       ...customFields.map((f) => text(cf[f.field_key])),
     ];

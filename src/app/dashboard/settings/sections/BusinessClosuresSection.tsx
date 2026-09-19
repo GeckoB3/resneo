@@ -12,6 +12,7 @@ import {
 } from '@/app/dashboard/resource-timeline/ResourceExceptionsCalendar';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { readResponseJson } from '@/lib/http/read-response-json';
+import { ConfirmDialog } from '@/components/ui/primitives/ConfirmDialog';
 
 type BlockType = 'closed' | 'amended_hours' | 'reduced_capacity' | 'special_event';
 
@@ -270,6 +271,18 @@ function UnifiedBlocksEditor({
   const [rangeStart, setRangeStart] = useState<string | null>(seededDate);
   const [rangeEnd, setRangeEnd] = useState<string | null>(seededDate);
   const [editingId, setEditingId] = useState<string | null>(null);
+  /**
+   * The one question this card asks before an irreversible step. A native `window.confirm`
+   * used to ask it, and the dashboard suppresses native dialogs, so Delete did nothing and a
+   * closure over existing bookings could never be confirmed.
+   */
+  const [confirmState, setConfirmState] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    destructive?: boolean;
+    run: () => Promise<void>;
+  } | null>(null);
   const [draft, setDraft] = useState<DraftState>(() =>
     seededDate ? { ...emptyDraft(), date_start: seededDate, date_end: seededDate } : emptyDraft(),
   );
@@ -387,48 +400,51 @@ function UnifiedBlocksEditor({
           },
         );
 
-      let res = await send(false);
-      let data = await readResponseJson<{
-        error?: string;
-        block?: Block;
-        requires_confirmation?: boolean;
-        message?: string;
-      }>(res);
+      type SaveResponse = { error?: string; block?: Block; requires_confirmation?: boolean; message?: string };
+      const apply = async (res: Response, data: SaveResponse) => {
+        if (!res.ok) {
+          throw new Error(data.error || 'Failed to save');
+        }
+        if (!data.block) {
+          throw new Error('Failed to save');
+        }
+        const savedBlock = data.block;
+        const nextBlocks = editingId
+          ? blocks.map((b) => (b.id === editingId ? savedBlock : b))
+          : [...blocks, savedBlock];
+        setBlocks(nextBlocks);
+        cancelEdit();
+        if (savedBlock.block_type === 'closed' || savedBlock.block_type === 'amended_hours') {
+          setAdvice(await venueDatedAdvice(venue.opening_hours, nextBlocks, savedBlock));
+        }
+      };
+
+      const res = await send(false);
+      const data = await readResponseJson<SaveResponse>(res);
 
       if (res.status === 409 && data.requires_confirmation) {
-        const proceed =
-          typeof window !== 'undefined' &&
-          window.confirm(
-            `${data.message ?? 'You already have bookings in that period.'}\n\nAdd this closure anyway?`,
-          );
-        if (!proceed) {
-          setSaving(false);
-          return;
-        }
-        res = await send(true);
-        data = await readResponseJson<{
-          error?: string;
-          block?: Block;
-          requires_confirmation?: boolean;
-          message?: string;
-        }>(res);
+        setSaving(false);
+        setConfirmState({
+          title: 'Add this closure anyway?',
+          message: data.message ?? 'You already have bookings in that period.',
+          confirmLabel: 'Add anyway',
+          run: async () => {
+            setSaving(true);
+            setError(null);
+            try {
+              const again = await send(true);
+              await apply(again, await readResponseJson<SaveResponse>(again));
+            } catch (err) {
+              setError(err instanceof Error ? err.message : 'Failed to save');
+            } finally {
+              setSaving(false);
+            }
+          },
+        });
+        return;
       }
 
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to save');
-      }
-      if (!data.block) {
-        throw new Error('Failed to save');
-      }
-      const savedBlock = data.block;
-      const nextBlocks = editingId
-        ? blocks.map((b) => (b.id === editingId ? savedBlock : b))
-        : [...blocks, savedBlock];
-      setBlocks(nextBlocks);
-      cancelEdit();
-      if (savedBlock.block_type === 'closed' || savedBlock.block_type === 'amended_hours') {
-        setAdvice(await venueDatedAdvice(venue.opening_hours, nextBlocks, savedBlock));
-      }
+      await apply(res, data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save');
     } finally {
@@ -436,20 +452,30 @@ function UnifiedBlocksEditor({
     }
   }, [draft, editingId, cancelEdit, blocks, venue.opening_hours]);
 
-  const handleDelete = useCallback(async (id: string) => {
-    if (!confirm('Remove this block?')) return;
-    try {
-      await fetch('/api/venue/availability-blocks', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id }),
+  const handleDelete = useCallback(
+    (id: string) => {
+      setConfirmState({
+        title: 'Remove this block?',
+        message: 'The dates go back to your usual hours. Bookings already made are not changed.',
+        confirmLabel: 'Remove',
+        destructive: true,
+        run: async () => {
+          try {
+            await fetch('/api/venue/availability-blocks', {
+              method: 'DELETE',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id }),
+            });
+            setBlocks((prev) => prev.filter((b) => b.id !== id));
+            if (editingId === id) cancelEdit();
+          } catch {
+            setError('Failed to delete');
+          }
+        },
       });
-      setBlocks((prev) => prev.filter((b) => b.id !== id));
-      if (editingId === id) cancelEdit();
-    } catch {
-      setError('Failed to delete');
-    }
-  }, [editingId, cancelEdit]);
+    },
+    [editingId, cancelEdit],
+  );
 
   const today = new Date().toISOString().slice(0, 10);
   const futureBlocks = useMemo(
@@ -836,6 +862,22 @@ function UnifiedBlocksEditor({
       {blocks.length === 0 && (
         <p className="text-center text-sm text-slate-400">No closures, amended hours, or capacity blocks configured.</p>
       )}
+
+      <ConfirmDialog
+        open={confirmState !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmState(null);
+        }}
+        title={confirmState?.title ?? ''}
+        message={confirmState?.message ?? ''}
+        confirmLabel={confirmState?.confirmLabel ?? 'Confirm'}
+        destructive={confirmState?.destructive}
+        onConfirm={() => {
+          const pending = confirmState;
+          setConfirmState(null);
+          if (pending) void pending.run();
+        }}
+      />
     </section>
   );
 }

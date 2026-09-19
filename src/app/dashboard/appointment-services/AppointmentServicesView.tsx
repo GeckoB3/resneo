@@ -604,7 +604,9 @@ export function AppointmentServicesView({
       id: block.collective_id,
       name: block.collective_name,
       hostVenueName: block.host_venue_name,
-      isHost: roles.has('master') || !roles.has('replica'),
+      // The server says which side this venue is on. Guessing from the roles, kept for an older
+      // server, took a member whose services are all parked for the host.
+      isHost: block.venue_role ? block.venue_role === 'host' : roles.has('master') || !roles.has('replica'),
     };
   }, [services]);
 
@@ -1793,7 +1795,16 @@ export function AppointmentServicesView({
                 />
                 <SectionCard.Body className="!pt-3">
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="min-w-0 flex-1 space-y-3">
+                    {/*
+                      The details keep at least this width, so a long row of switches beside them
+                      wraps instead of squeezing them into a sliver (a parked card's row is longer).
+                    */}
+                    <div className="min-w-0 flex-1 space-y-3 sm:min-w-[14rem]">
+                  {collective?.isHost && svc.collective?.role === 'parked' ? (
+                    <p className="text-xs text-slate-600">
+                      {collectiveCopy('svc.card.parked', { collective: svc.collective.collective_name })}
+                    </p>
+                  ) : null}
                   <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
                     <Pill variant="brand" size="sm">
                       {formatPrice(display.price_pence)}
@@ -2017,7 +2028,7 @@ export function AppointmentServicesView({
                     (linkedPractitionerIds.length > 0 &&
                       Boolean(currentStaffId) &&
                       svc.created_by_staff_id === currentStaffId)) && (
-                    <div className="flex flex-shrink-0 flex-wrap items-center gap-x-4 gap-y-2 sm:pt-1">
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 sm:justify-end sm:pt-1">
                       {/*
                         Admins only. The PATCH route filters a team member's
                         body down to the fields their calendar permissions
@@ -2056,6 +2067,13 @@ export function AppointmentServicesView({
                       {isAdmin && !isManagedByHost(svc) ? (() => {
                         const toggling = activeToggling.has(svc.id);
                         const switchId = `service-active-${svc.id}`;
+                        // A parked service is not visible to guests whatever the switch says, so its label says when it would be.
+                        const activeLabel =
+                          svc.collective?.role === 'parked'
+                            ? collective?.isHost
+                              ? collectiveCopy('svc.card.activeParkedHost')
+                              : collectiveCopy('svc.card.activeParked', { collective: svc.collective.collective_name })
+                            : 'Active (visible to guests)';
                         return (
                           <span className="flex items-center gap-2">
                             <button
@@ -2063,7 +2081,7 @@ export function AppointmentServicesView({
                               id={switchId}
                               role="switch"
                               aria-checked={svc.is_active}
-                              aria-label={`Active (visible to guests): ${svc.name}`}
+                              aria-label={`${activeLabel}: ${svc.name}`}
                               disabled={toggling}
                               onClick={() => void toggleServiceActive(svc, !svc.is_active)}
                               className={`relative h-5 w-9 shrink-0 rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 disabled:cursor-wait disabled:opacity-60 ${
@@ -2077,14 +2095,13 @@ export function AppointmentServicesView({
                               />
                             </button>
                             <label htmlFor={switchId} className="cursor-pointer select-none text-xs text-slate-600">
-                              {svc.collective?.role === 'parked'
-                                ? collectiveCopy('svc.card.activeParked', { collective: svc.collective.collective_name })
-                                : 'Active (visible to guests)'}
+                              {activeLabel}
                             </label>
                           </span>
                         );
                       })() : null}
-                      {isAdmin && svc.collective?.role === 'parked' && collective ? (
+                      {/* A member asks its host to add a parked service; the host has the page switch instead. */}
+                      {isAdmin && svc.collective?.role === 'parked' && collective && !collective.isHost ? (
                         <button
                           type="button"
                           onClick={() => {

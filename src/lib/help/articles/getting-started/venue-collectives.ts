@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Run several venues as one collective",
   description: "Put linked venues on one booking page, with one set of services that the host manages and every venue keeping its own calendars, clients and payments.",
   tags: ["venue collective","combined booking page","multi venue","host","member","parked services","staff bookings only","shared services"],
-  verified: '2026-09-17',
+  verified: '2026-09-19',
   content: `# Run several venues as one collective
 
 A **collective** puts two or more linked venues on one public booking page, so your clients see one business. One venue is the **host**. The host decides which services are on the page and sets their prices, deposits, options, add-ons and forms for every venue. Each venue keeps its own calendars, working hours, clients, bookings and payments.
@@ -49,7 +49,7 @@ Open **Services**. Your services show a **Collective** badge when they are on th
 
 - To put a service on the page, switch on **On the** collective **page** on its card, or tick **Show on the** collective **page** when you add a new one. ResNeo sets it up at every venue with your settings.
 - When you save a service that is on the page, the change reaches every venue. The message after saving says whether every venue is up to date. If you change your mind within a minute, click **Put it back**.
-- A service that is not on the page is **parked** while the collective is live.
+- A service that is not on the page is **parked** while the collective is live, and its card shows a **Parked** badge. Switching **On the** collective **page** off takes a service off the page and parks it at your venue; switching it back on puts it back.
 - To add a service only another venue has, click **Add from another venue**. It is copied into your services and put on the page, and that venue is asked whether to use its own service for it.
 
 Then choose who offers each service. Under **Calendars that offer this service**, tick calendars at any venue in the collective. **Edit values** sets a price, length, buffer, deposit, colour or name for one calendar, where the service allows it.

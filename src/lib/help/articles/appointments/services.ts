@@ -20,7 +20,7 @@ export const article: HelpArticle = {
     'overrides',
     'categories',
   ],
-  verified: '2026-09-17',
+  verified: '2026-09-19',
   content: `
 # Appointment services
 
@@ -234,7 +234,7 @@ When your venue is part of a [venue collective](/help/getting-started/venue-coll
 
 - **At the host**, a service on the collective page shows a **Collective** badge. Saving it changes it at every venue in the collective.
 - **At a member venue**, the host's services are listed under **From** and the host's name. Open one with **View** to see its settings. You choose which of your own calendars offer it, and set per-calendar values where the host allows them. Everything else is the host's to change.
-- Your own services that are not on the collective page are **parked**: nobody can book them while the collective is live, but bookings already made are kept. You can suggest one to the host with **Suggest to** and the host's name.
+- Your own services that are not on the collective page are **parked**: nobody can book them while the collective is live, but bookings already made are kept. Their cards say so with a **Parked** badge. At the host, switch on **On the** collective **page** on the card to put one on the page. At a member venue, suggest one to the host with **Suggest to** and the host's name.
 
 ## Common problems & fixes
 

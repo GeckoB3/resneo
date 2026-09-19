@@ -20,6 +20,12 @@ import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/fe
 
 export interface CollectiveServiceBlock {
   role: CollectiveServiceRole;
+  /**
+   * Which side of the collective this venue is on. Every block for a venue carries the same one,
+   * so a page need not guess it from the roles (a member whose services are all parked has no
+   * replica to tell it apart from the host). Always set here; absent from servers before 2026-09-19.
+   */
+  venue_role?: 'host' | 'member';
   collective_id: string;
   collective_name: string;
   host_venue_name: string;
@@ -122,6 +128,7 @@ export async function loadCollectiveServiceBlocks(
   const paused = Boolean(state.paused ?? collectiveRow.paused_at);
   const hostVenueName = venues.get(collectiveRow.host_venue_id as string)?.name ?? 'the host';
   const base = {
+    venue_role: isHost ? ('host' as const) : ('member' as const),
     collective_id: collectiveId,
     collective_name: (collectiveRow.name as string) ?? 'your collective',
     host_venue_name: hostVenueName,
@@ -197,10 +204,11 @@ export async function loadCollectiveServiceBlocks(
     }
   }
 
-  // Everything else the venue offers is parked while it is live (D2).
+  // Everything else the venue offers is parked while it is live (D2), switched off or not: a
+  // service without a block lost its Parked pill and, at the host, its On the page switch.
   const { data: bookableRaw } = await admin.rpc('collective_bookable_service_ids', { p_venue_id: venueId });
   const bookable = new Set(Array.isArray(bookableRaw) ? (bookableRaw as string[]) : []);
-  const { data: ownServices } = await admin.from('service_items').select('id').eq('venue_id', venueId).eq('is_active', true);
+  const { data: ownServices } = await admin.from('service_items').select('id').eq('venue_id', venueId);
   for (const row of ownServices ?? []) {
     const id = row.id as string;
     if (blocks.has(id) || bookable.has(id)) continue;

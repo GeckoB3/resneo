@@ -189,6 +189,8 @@ export const COLLECTIVE_COPY = {
     'Your forms are switched off, so {count} service that needs a form is hidden from your guests.',
   'cal.parkedHeading': 'Parked: nobody can book these while the collective is live',
   'svc.card.activeParked': 'Active (bookable again if you leave {collective})',
+  // The host's own parked service comes back by going on the page, not by leaving (2026-09-19).
+  'svc.card.activeParkedHost': 'Active (bookable once it is on the page)',
   'svc.offer.chooseCalendars': 'Choose calendars',
   'svc.card.onPageSwitch': 'On the {collective} page',
   'svc.offer.title': 'Add {service} to the {collective} page?',

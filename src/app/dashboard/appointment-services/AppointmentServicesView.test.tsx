@@ -68,8 +68,8 @@ describe('a venue in a collective', () => {
   const hostWorld = (extra: ServicesViewOptions = {}) =>
     show({
       services: [
-        harnessService({ collective: harnessCollectiveBlock() }),
-        harnessService({ id: 'svc-2', name: 'Massage', collective: harnessCollectiveBlock({ role: 'parked', item_id: null, status: 'hidden', status_reason: 'This service is not on the Northside page.' }) }),
+        harnessService({ collective: harnessCollectiveBlock({ venue_role: 'host' }) }),
+        harnessService({ id: 'svc-2', name: 'Massage', collective: harnessCollectiveBlock({ role: 'parked', venue_role: 'host', item_id: null, status: 'hidden', status_reason: 'This service is not on the Northside page.' }) }),
       ],
       collectiveCalendars: [
         {
@@ -102,6 +102,25 @@ describe('a venue in a collective', () => {
     await world.ready();
     expect(screen.getByText('Collective')).toBeInTheDocument();
     expect(screen.getByText('Parked')).toBeInTheDocument();
+  });
+
+  it("gives the host's parked service the page switch and says how to make it bookable", async () => {
+    const world = hostWorld();
+    await world.ready();
+    // Taken off the page: the switch is there, off, to put it back.
+    expect(screen.getByRole('switch', { name: 'On the Northside page: Massage' })).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
+    expect(
+      screen.getByText('Parked while Northside is live. Put it on the page to take bookings for it.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: 'Active (bookable once it is on the page): Massage' })).toBeInTheDocument();
+    // Suggesting a service to the host is a member's action; the host would be asking itself.
+    expect(screen.queryByRole('button', { name: /Suggest to/ })).not.toBeInTheDocument();
+    // The service on the page reads as before.
+    expect(screen.getByRole('switch', { name: 'Active (visible to guests): Facial' })).toBeInTheDocument();
+    expect(screen.getAllByText(/Parked while Northside is live/)).toHaveLength(1);
   });
 
   it('shows only what the filter asks for', async () => {
@@ -160,8 +179,12 @@ describe('a member of a collective', () => {
     await world.ready();
     expect(screen.queryByRole('switch', { name: /Active \(visible to guests\): Facial/ })).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'View' }).length).toBe(2);
-    // Its own parked service is still its own: it keeps Edit, its switch and its Delete.
-    expect(screen.getByRole('switch', { name: /Active \(visible to guests\): Sauna/ })).toBeInTheDocument();
+    // Its own parked service is still its own: it keeps Edit, its switch and its Delete. The switch
+    // says when the service would be bookable again, aloud as well as on screen.
+    expect(
+      screen.getByRole('switch', { name: 'Active (bookable again if you leave Northside): Sauna' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Active (bookable again if you leave Northside)')).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'Edit' })).toHaveLength(1);
   });
 
@@ -178,12 +201,13 @@ describe('a member of a collective', () => {
   });
 
   it('suggests a parked service to the host, after asking', async () => {
+    // Every service it has is parked, so only the server's venue_role says this is a member.
     const world = show({
       services: [
         harnessService({
           id: 'svc-3',
           name: 'Sauna',
-          collective: harnessCollectiveBlock({ role: 'parked', item_id: null, status: 'hidden' }),
+          collective: harnessCollectiveBlock({ role: 'parked', venue_role: 'member', item_id: null, status: 'hidden' }),
         }),
       ],
       routes: { 'POST /api/venue/collectives/': { status: 201, body: { ok: true } } },

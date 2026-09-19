@@ -42,6 +42,8 @@ export interface PractitionerCalendarToolbarProps {
   liveState?: 'live' | 'reconnecting';
   /** Clock button, top left: amend calendar hours (everyone) or business hours (admins). */
   onAmendHours?: () => void;
+  /** Key button beside it: what the closed stripes' colours mean. */
+  onOpenKey?: () => void;
   searchPanel?: ReactNode;
   searchActive?: boolean;
   searchAriaLabel?: string;
@@ -115,6 +117,7 @@ export function PractitionerCalendarToolbar({
   scheduleUndo,
   liveState = 'live',
   onAmendHours,
+  onOpenKey,
   searchPanel,
   searchActive = false,
   searchAriaLabel = 'Search bookings',
@@ -164,6 +167,19 @@ export function PractitionerCalendarToolbar({
         >
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+          </svg>
+        </button>
+      ) : null}
+      {onOpenKey ? (
+        <button
+          type="button"
+          onClick={onOpenKey}
+          aria-label="Colour key"
+          title="What the colours mean"
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50 hover:text-slate-900"
+        >
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h4v4H4zM4 14h4v4H4zM11 8h9M11 16h9" />
           </svg>
         </button>
       ) : null}
@@ -251,7 +267,7 @@ export function PractitionerCalendarToolbar({
       ) : null}
       </>
     ),
-    [compactDay, onAmendHours, onToggleCompactDay, onViewModeChange, viewMode, viewModePanelId, viewModePopoverOpen],
+    [compactDay, onAmendHours, onOpenKey, onToggleCompactDay, onViewModeChange, viewMode, viewModePanelId, viewModePopoverOpen],
   );
 
   const datePickerPanel = (

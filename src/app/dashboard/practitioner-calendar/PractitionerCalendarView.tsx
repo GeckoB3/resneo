@@ -208,6 +208,7 @@ import {
 import { ScheduleFeedColumn } from './ScheduleFeedColumn';
 import { WeekScheduleCdeStrip } from './WeekScheduleCdeStrip';
 import { MonthScheduleGrid } from './MonthScheduleGrid';
+import { CalendarKeyDialog } from './CalendarKeyDialog';
 import { PractitionerCalendarToolbar } from './PractitionerCalendarToolbar';
 import { ScheduleEditFollowUpBar, type ScheduleEditFollowUpChange } from './ScheduleEditFollowUpBar';
 import { OperationsToolbarGuestSearchPanel } from '@/components/dashboard/OperationsToolbarGuestSearchPanel';
@@ -3938,6 +3939,7 @@ export function PractitionerCalendarView({
   const [endHourOverride, setEndHourOverride] = useState<number | null>(null);
   /** The clock button's dialog (amend calendar hours / business hours). */
   const [hoursQuickEditOpen, setHoursQuickEditOpen] = useState(false);
+  const [keyOpen, setKeyOpen] = useState(false);
   /**
    * "Compact" day view. `compactDay` is the user's persisted toggle; `measuredSlotHeight`
    * is the px-per-slot computed each layout to fit the whole day on one screen. Until the
@@ -4176,36 +4178,39 @@ export function PractitionerCalendarView({
     });
     // One explanation per minute: venue-only, calendar-only, or both.
     const own = partitionScheduleClosureBlocks([...venueBlocks, ...practitionerBlocks]) as CalendarBlock[];
-    if (viewMode !== 'day') return own;
+    const linkedDates = viewMode === 'day' ? [activeDayDate] : viewMode === 'week' ? weekDatesFrom(weekStart) : [];
+    if (linkedDates.length === 0) return own;
     // Linked columns, resolved as their owner resolves them and split the same way (spec §8.2);
     // the weekly template alone for an older feed.
     const linked: CalendarBlock[] = [];
     for (const col of linkedColumns) {
       const tz = col.venueTimezone || venueTimezone;
-      const resolved = buildLinkedColumnScheduleClosureBlocks({
-        columnId: col.key,
-        practitionerId: col.practitionerId,
-        schedule: col.schedule,
-        hours: col.hours,
-        dateYmd: activeDayDate,
-        timeZone: tz,
-        gridBounds: { start: startHour * 60, end: endHour * 60 },
-      });
-      const blocksForColumn =
-        resolved ??
-        buildLinkedColumnClosureBlocks({
+      for (const dateYmd of linkedDates) {
+        const resolved = buildLinkedColumnScheduleClosureBlocks({
           columnId: col.key,
-          workingHours: col.workingHours,
-          openRanges: null,
-          dateYmd: activeDayDate,
+          practitionerId: col.practitionerId,
+          schedule: col.schedule,
+          hours: col.hours,
+          dateYmd,
           timeZone: tz,
-          gridStartHour: startHour,
-          gridEndHour: endHour,
+          gridBounds,
         });
-      linked.push(...(blocksForColumn as unknown as CalendarBlock[]));
+        const blocksForColumn =
+          resolved ??
+          buildLinkedColumnClosureBlocks({
+            columnId: col.key,
+            workingHours: col.workingHours,
+            openRanges: null,
+            dateYmd,
+            timeZone: tz,
+            gridStartHour: startHour,
+            gridEndHour: endHour,
+          });
+        linked.push(...(blocksForColumn as unknown as CalendarBlock[]));
+      }
     }
     return [...own, ...linked];
-  }, [practitioners, openingHours, venueWideBlocks, leavePeriods, listFromTo.from, listFromTo.to, venueTimezone, viewMode, startHour, endHour, linkedColumns, activeDayDate]);
+  }, [practitioners, openingHours, venueWideBlocks, leavePeriods, listFromTo.from, listFromTo.to, venueTimezone, viewMode, startHour, endHour, linkedColumns, activeDayDate, weekStart]);
 
   /** Column id to display name, for "<calendar> unavailable" stripes. */
   const columnNameById = useMemo(() => {
@@ -7443,6 +7448,7 @@ export function PractitionerCalendarView({
   return (
     <div className="flex min-w-[320px] flex-col">
       <div className="flex-shrink-0 space-y-3 pb-3">
+        <CalendarKeyDialog open={keyOpen} onClose={() => setKeyOpen(false)} />
         <PractitionerCalendarToolbar
           viewMode={viewMode}
           onViewModeChange={setViewMode}
@@ -7458,6 +7464,7 @@ export function PractitionerCalendarView({
           endHour={endHour}
           onTimeRangeChange={handleTimeRangeChange}
           onAmendHours={() => setHoursQuickEditOpen(true)}
+          onOpenKey={() => setKeyOpen(true)}
           onRefresh={() => {
             void fetchData({ refreshCatalog: true });
             void requestLinkedCalendarSync();
@@ -7787,6 +7794,9 @@ export function PractitionerCalendarView({
                       <span className="mt-0.5 block text-[11px] leading-tight text-slate-600" title={linkedHoursLine}>
                         {linkedHoursLine}
                       </span>
+                      {col.venueTimezone && col.venueTimezone !== venueTimezone ? (
+                        <span className="mt-0.5 block text-[10px] leading-tight text-slate-500">Times in {col.venueTimezone}</span>
+                      ) : null}
                       {col.action === 'create_edit_cancel' && staffCollectiveResolved && !collectiveTargetFor(col.venueId, col.practitionerId) ? (
                         <button
                           type="button"
@@ -7809,9 +7819,27 @@ export function PractitionerCalendarView({
                       const dayBookings = linkedBookingsFor(col, d);
                       const { classBlocks: dayClassBlocks, eventBlocks: dayEventBlocks } =
                         linkedScheduleForColumn(col, d);
+                      // §8.2: the same closure chips an own row shows, from the partner's own hours.
+                      const dayClosures = displayBlocks.filter(
+                        (bl) => columnIdForBlock(bl) === col.key && bl.block_date === d && isScheduleClosureBlock(bl),
+                      );
                       return (
                         <td key={d} className="border-l border-slate-200 align-top px-1 py-2">
                           <div className="flex min-h-[80px] flex-col gap-1">
+                            {dayClosures.map((bl) => (
+                              <div
+                                key={bl.id}
+                                className={`rounded-lg border px-2 py-1 text-left text-xs text-slate-800 ${calendarBlockShellClass(bl)}`}
+                                title={calendarBlockHeading(bl, col.practitionerName)}
+                              >
+                                <span className={`font-semibold ${calendarBlockHeadingTextClass(bl)}`}>
+                                  {calendarBlockHeading(bl, col.practitionerName)}
+                                </span>
+                                <span className="mt-0.5 block text-[10px] tabular-nums text-slate-600">
+                                  {bl.start_time.slice(0, 5)} – {bl.end_time.slice(0, 5)}
+                                </span>
+                              </div>
+                            ))}
                             {dayEventBlocks.map((eb) => {
                               const accent = eb.accent_colour ?? '#F59E0B';
                               const uptake = formatEventUptakeLine(eb);
@@ -8040,6 +8068,11 @@ export function PractitionerCalendarView({
                         >
                           Linked · {linkedCol.venueName}
                         </span>
+                        {linkedCol.venueTimezone && linkedCol.venueTimezone !== venueTimezone ? (
+                          <span className="line-clamp-1 w-full text-center text-[10px] leading-tight text-slate-500" title="This venue keeps a different clock; its column shows its own local times.">
+                            Times in {linkedCol.venueTimezone}
+                          </span>
+                        ) : null}
                         <span
                           className="line-clamp-2 w-full text-center text-[11px] leading-tight text-slate-600"
                           title={linkedHoursLine}

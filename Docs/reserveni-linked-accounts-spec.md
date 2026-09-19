@@ -1223,7 +1223,10 @@ interactions. A linked column's resolved hours widen the grid as an own calendar
 line carries the "(calendar 09:00–17:00)" and "Closed (outside business hours)" forms. An older feed
 without `schedule` and `hours` keeps the template-only slate "Linked venue closed" stripe. Amended hours
 have no stripe of their own on either kind of column, by design: the grid and the stripes follow the
-resolved hours. Timezones are not converted: a partner in another timezone is drawn on its own clock.
+resolved hours. Timezones are not converted: a partner in another timezone is drawn on its own clock,
+and its column header and week row say "Times in {timezone}" when that clock differs from the viewer's.
+The week view carries a row per linked column (the same closure chips, then the partner's bookings), and
+the toolbar's key button (beside the clock) opens "What the colours mean", the diary's one colour legend.
 
 ### 8.3 Incoming-request banner
 

@@ -196,7 +196,8 @@ export function buildLinkedColumnScheduleClosureBlocks(params: {
     | undefined;
   dateYmd: string;
   timeZone: string;
-  gridBounds: { start: number; end: number };
+  /** The drawn range when wider than the hours (the day grid); the week view leaves it to the date's own bounds, as an own column does. */
+  gridBounds?: { start: number; end: number };
 }): ScheduleClosureCalendarBlock[] | null {
   const { columnId, practitionerId, schedule, hours, dateYmd, timeZone, gridBounds } = params;
   if (!schedule || !hours) return null;

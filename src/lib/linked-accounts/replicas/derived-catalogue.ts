@@ -55,9 +55,24 @@ export interface DerivedVenue {
   formsOn: boolean;
 }
 
+/** What an offering's master service says about itself, read from the row, not from a calendar. */
+export interface DerivedMaster {
+  name: string;
+  description: string | null;
+  category: ServiceCategoryRef | null;
+  sortOrder: number;
+}
+
 export interface DerivedCatalogueInput {
   hostVenueId: string;
   offerings: DerivedOffering[];
+  /**
+   * The masters by service id. `venueData` is built from calendars, so a master the host offers
+   * on no calendar of its own is absent from it, and until 2026-09-19 such an offering took its
+   * name from a member's replica and had no heading at all ("Other services"). The master row
+   * is the authority for name, description, heading and order; calendars only say who offers it.
+   */
+  masters?: Record<string, DerivedMaster>;
   links: DerivedLink[];
   venues: Record<string, DerivedVenue>;
   venueData: Record<string, VenueCatalogueData>;
@@ -110,10 +125,11 @@ export function buildDerivedCatalogueItems(input: DerivedCatalogueInput): Derive
 
     const providers: PublicCatalogueProvider[] = [];
     const excluded: DerivedCatalogueItem['excluded'] = [];
-    let name: string | null = null;
-    let description: string | null = null;
-    let category: ServiceCategoryRef | null = null;
-    let sourceOrder = 0;
+    const master = input.masters?.[offering.masterServiceId] ?? null;
+    let name: string | null = master?.name ?? null;
+    let description: string | null = master?.description ?? null;
+    let category: ServiceCategoryRef | null = master?.category ?? null;
+    let sourceOrder = master?.sortOrder ?? 0;
 
     for (const source of sources) {
       const venue = input.venues[source.venueId];

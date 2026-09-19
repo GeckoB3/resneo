@@ -22,10 +22,11 @@ import {
 } from './collectives';
 import { evaluateLinkEligibility } from './eligibility';
 import { currencyMismatchWords, normalCurrency } from './collective-currency';
-import { fetchServiceCategoryRefs } from '@/lib/booking/service-categories-db';
+import { fetchServiceCategoryRefs, serviceCategoryLookup } from '@/lib/booking/service-categories-db';
 import {
   buildDerivedCatalogueItems,
   type DerivedLink,
+  type DerivedMaster,
   type DerivedVenue,
   type ProviderExclusion,
 } from './replicas/derived-catalogue';
@@ -971,6 +972,8 @@ async function loadPublicCombinedCatalogueUncached(
   if ((collective as { service_model?: string }).service_model === 'replicas') {
     const hostVenueId = (collective.host_venue_id as string | null) ?? '';
     const paused = Boolean((collective as { paused_at?: string | null }).paused_at);
+    // Headings follow the host's services on the replicas model, not the collective's own list.
+    const hostCategories = hostVenueId ? await fetchServiceCategoryRefs(admin, hostVenueId) : [];
     const derivedItems = paused
       ? []
       : await loadDerivedCatalogueItems(admin, {
@@ -981,6 +984,7 @@ async function loadPublicCombinedCatalogueUncached(
           venues: (venues ?? []) as Array<Record<string, unknown>>,
           venueInfo,
           venueData,
+          hostCategories,
         });
     const ordered = derivedItems
       .filter((item) => item.providers.length > 0)
@@ -993,8 +997,7 @@ async function loadPublicCombinedCatalogueUncached(
       excludedByItem: Object.fromEntries(
         derivedItems.filter((i) => i.excluded.length > 0).map((i) => [i.id, i.excluded]),
       ),
-      // Headings follow the host's services on the replicas model, not the collective's own list.
-      categories: hostVenueId ? await fetchServiceCategoryRefs(admin, hostVenueId) : [],
+      categories: hostCategories,
       venueData,
       hostVenueId: hostVenueId || null,
     };
@@ -1122,6 +1125,8 @@ async function loadDerivedCatalogueItems(
     venues: Array<Record<string, unknown>>;
     venueInfo: Record<string, { name: string; slug: string; eligible: boolean }>;
     venueData: Record<string, VenueCatalogueData>;
+    /** The host's headings, so a master's category_id resolves to a heading. */
+    hostCategories: ServiceCategoryRef[];
   },
 ) {
   const offerings = ctx.items
@@ -1177,12 +1182,29 @@ async function loadDerivedCatalogueItems(
   ];
   const venueIds = Object.keys(venues);
   const [paymentRes, serviceFormsRes, venueFormsRes] = await Promise.all([
-    admin.from('service_items').select('id, payment_requirement, is_bookable_online').in('id', serviceIds),
+    admin
+      .from('service_items')
+      .select('id, venue_id, name, description, category_id, sort_order, payment_requirement, is_bookable_online')
+      .in('id', serviceIds),
     admin.from('service_compliance_requirements').select('service_item_id').in('service_item_id', serviceIds),
     admin.from('service_compliance_requirements').select('venue_id').eq('scope', 'venue').in('venue_id', venueIds),
   ]);
   for (const res of [paymentRes, serviceFormsRes, venueFormsRes]) {
     if (res.error) console.error('[catalogue] derived catalogue read failed:', res.error.message, { collectiveId: ctx.collectiveId });
+  }
+
+  // The master rows themselves: a master the host offers on no calendar is absent from
+  // `venueData`, and its name and heading must still come from the host, not from a replica.
+  const categoryFor = serviceCategoryLookup(ctx.hostCategories);
+  const masters: Record<string, DerivedMaster> = {};
+  for (const r of paymentRes.data ?? []) {
+    if ((r.venue_id as string | null) !== ctx.hostVenueId) continue;
+    masters[r.id as string] = {
+      name: (r.name as string | null) ?? 'Service',
+      description: ((r.description as string | null) ?? '').trim() || null,
+      category: categoryFor(r.category_id as string | null),
+      sortOrder: (r.sort_order as number | null) ?? 0,
+    };
   }
 
   return buildDerivedCatalogueItems({
@@ -1191,6 +1213,7 @@ async function loadDerivedCatalogueItems(
     links,
     venues,
     venueData: ctx.venueData,
+    masters,
     paidServiceIds: new Set(
       (paymentRes.data ?? [])
         .filter((r) => ((r.payment_requirement as string | null) ?? 'none') !== 'none')

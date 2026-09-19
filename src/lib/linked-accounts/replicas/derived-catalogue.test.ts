@@ -65,6 +65,39 @@ describe('buildDerivedCatalogueItems', () => {
     expect(item!.excluded).toEqual([]);
   });
 
+  it('takes the name and heading from the master when the host offers it on no calendar of its own', () => {
+    /*
+      The 19 Sep "Beard Trim" case: the host filed the master under Hair but had not put it on
+      any of its calendars, so it was missing from the host's calendar-built data. The offering
+      then took its name from the member's replica and had no heading at all, so the combined
+      page listed it under "Other services" while every host-offered service sat under its heading.
+    */
+    const hair = { id: 'h-hair', name: 'Hair', sort_order: 0 };
+    const [item] = buildDerivedCatalogueItems(
+      input({
+        venueData: {
+          host: venueData([]),
+          member: venueData([{ id: 'r1', name: 'Beard trim (copy)', price: 1800, calendars: [{ id: 'mc1', name: 'Ann' }] }]),
+        },
+        masters: { m1: { name: 'Beard Trim', description: 'Tidy and shape', category: hair, sortOrder: 7 } },
+      }),
+    );
+    expect(item!.name).toBe('Beard Trim');
+    expect(item!.description).toBe('Tidy and shape');
+    expect(item!.category).toEqual(hair);
+    expect(item!.sortKey).toEqual({ displayOrder: 0, sourceOrder: 7, category: hair });
+    // Only the member offers it; the host contributes the words, not a provider.
+    expect(item!.providers.map((p) => [p.venueId, p.practitionerId])).toEqual([['member', 'mc1']]);
+  });
+
+  it('still prefers what the host calendar data says when the master is on a host calendar', () => {
+    const [item] = buildDerivedCatalogueItems(
+      input({ masters: { m1: { name: 'Stale name', description: null, category: null, sortOrder: 1 } } }),
+    );
+    expect(item!.name).toBe('Peel');
+    expect(item!.category).toEqual(heading);
+  });
+
   it('leaves out a replica that is behind, and says why', () => {
     const [item] = buildDerivedCatalogueItems(input({ links: [{ itemId: 'item-1', venueId: 'member', replicaServiceId: 'r1', current: false }] }));
     expect(item!.providers.map((p) => p.venueId)).toEqual(['host']);

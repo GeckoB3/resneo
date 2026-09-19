@@ -9,6 +9,8 @@ import {
 import { notifyCollectiveDissolved } from '@/lib/linked-accounts/notifications';
 import { engineErrorResponse } from '@/lib/linked-accounts/replicas/host-route-helpers';
 import { invalidateCollectiveCatalogMemo } from '@/lib/linked-accounts/collective-venue';
+import { drainReleaseFollowups } from '@/lib/linked-accounts/replicas/release-followups';
+import { pendingReleaseFollowups } from '@/lib/linked-accounts/replicas/below-two';
 
 async function loadHostedCollective(
   admin: import('@supabase/supabase-js').SupabaseClient,
@@ -300,6 +302,9 @@ export async function DELETE(
       if (error) {
         return engineErrorResponse(error, { collective: collective.name, host: ctx.venue.name }, 'Could not end the collective.');
       }
+      // Every venue's release follow-up (its photos, its review) runs now, as it does after a leave,
+      // so nobody's review panel waits on the cron saying "Copying photos".
+      await drainReleaseFollowups(ctx.admin, { operationIds: await pendingReleaseFollowups(ctx.admin, id) });
       invalidateCollectiveCatalogMemo(id);
       return NextResponse.json({ ok: true });
     }

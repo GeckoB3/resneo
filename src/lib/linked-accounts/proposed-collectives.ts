@@ -9,6 +9,8 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { dissolvedCollectiveSlug } from '@/lib/linked-accounts/collectives';
+import { drainReleaseFollowups } from '@/lib/linked-accounts/replicas/release-followups';
+import { pendingReleaseFollowups } from '@/lib/linked-accounts/replicas/below-two';
 
 type Row = Record<string, unknown>;
 
@@ -285,6 +287,7 @@ export async function closeInvitationForLink(
       console.error('closeInvitationForLink dissolve failed:', error.message);
       return { closed: true, dissolved: false, collectiveName: invitation.name };
     }
+    await drainReleaseFollowups(admin, { operationIds: await pendingReleaseFollowups(admin, invitation.id) });
   } else {
     await admin
       .from('venue_collectives')

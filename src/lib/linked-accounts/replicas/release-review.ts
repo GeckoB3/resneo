@@ -112,7 +112,9 @@ export async function loadReleaseReview(
   }
 
   const paid = releasedRows.some((s) => ((s.payment_requirement as string | null) ?? 'none') !== 'none');
-  const photos = await photoState(admin, venueId, collectiveId, releasedAt, (ops ?? [])[0] as Row | undefined);
+  const photos = await photoState(admin, venueId, collectiveId, releasedAt, (ops ?? [])[0] as Row | undefined, {
+    isHost: (collective?.host_venue_id as string | null) === venueId,
+  });
 
   return {
     collective_id: collectiveId,
@@ -138,8 +140,10 @@ async function photoState(
   collectiveId: string,
   releasedAt: string,
   op: Row | undefined,
+  opts: { isHost?: boolean } = {},
 ): Promise<ReleaseReview['photos']> {
-  if (op && (op.status === 'pending' || op.status === 'running')) return 'copying';
+  // The host's photos are its own files already; nothing is copied, so its panel never waits.
+  if (!opts.isHost && op && (op.status === 'pending' || op.status === 'running')) return 'copying';
   const { data: events } = await admin
     .from('collective_audit_events')
     .select('event_type')

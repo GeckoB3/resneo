@@ -38,6 +38,7 @@ export function VenueCollectivesPanel({
   onReviewLink,
   autoOpenSetupId = null,
   onSetupHandled,
+  refreshKey = 0,
 }: {
   venueName: string;
   activeLinks: AccountLinkView[];
@@ -48,6 +49,8 @@ export function VenueCollectivesPanel({
   /** `?setup={collectiveId}` from the dashboard banner: open the finish-setting-up wizard (plan L8). */
   autoOpenSetupId?: string | null;
   onSetupHandled?: () => void;
+  /** Changes when the tab knows a collective changed underneath (a request sent or answered with one). */
+  refreshKey?: number;
 }) {
   const [collectives, setCollectives] = useState<CollectiveView[]>([]);
   // The host's finish-setting-up wizard, and which collectives the banner feed says still need it.
@@ -102,7 +105,7 @@ export function VenueCollectivesPanel({
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, refreshKey]);
 
   const loadSetupNeeds = useCallback(async () => {
     try {
@@ -121,7 +124,7 @@ export function VenueCollectivesPanel({
 
   useEffect(() => {
     void loadSetupNeeds();
-  }, [loadSetupNeeds]);
+  }, [loadSetupNeeds, refreshKey]);
 
   useEffect(() => {
     if (!autoOpenSetupId || loading) return;

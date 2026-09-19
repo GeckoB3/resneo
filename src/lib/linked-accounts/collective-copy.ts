@@ -860,7 +860,7 @@ export const COLLECTIVE_COPY = {
   'respond.collective.needsFull':
     'Joining {collective} needs full access both ways with no calendar limits. With the permissions you chose you can accept the link only, and join later once the link grants full access.',
   'respond.collective.linkOnly': 'Accept the link only',
-  'respond.collective.linkOnly.note': 'The link starts now. The invitation to {collective} stays open on this tab for later.',
+  'respond.collective.linkOnly.note': 'Accept the link only: the link starts now and the invitation to {collective} stays open on this tab for later.',
   'respond.check.heading': 'Check and accept',
   'respond.check.link': 'The link with {venue} starts as soon as you accept.',
   'respond.consent':

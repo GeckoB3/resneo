@@ -279,7 +279,9 @@ export function JoinSummaryList({
   const ask = Object.values(draft.own).filter((c) => c === 'ask').length;
   return (
     <ul className="list-disc space-y-1 pl-5">
-      <li>{collectiveCopy('join.summary.setup', { count: preview.services_to_set_up, host })}</li>
+      {preview.services_to_set_up > 0 ? (
+        <li>{collectiveCopy('join.summary.setup', { count: preview.services_to_set_up, host })}</li>
+      ) : null}
       {useMine > 0 ? <li>{collectiveCopy('join.summary.useMine', { count: useMine, host })}</li> : null}
       {park > 0 ? <li>{collectiveCopy('join.summary.park', { count: park, collective })}</li> : null}
       {ask > 0 ? <li>{collectiveCopy('join.summary.ask', { count: ask, host })}</li> : null}

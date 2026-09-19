@@ -156,6 +156,9 @@ function LinkedAccountsSectionInner({ venueName }: { venueName: string }) {
   // opens the host's finish-setting-up wizard (Docs/link-and-collective-setup-wizard-plan.md §4).
   const [pendingReviewId, setPendingReviewId] = useState<string | null>(null);
   const [setupCollectiveId, setSetupCollectiveId] = useState<string | null>(null);
+  // Bumped after a link change that also changes a collective (a request sent with one, an
+  // invitation answered with one), so the collectives panel reloads without the tab remounting.
+  const [collectivesRefresh, setCollectivesRefresh] = useState(0);
   const [editLink, setEditLink] = useState<AccountLinkView | null>(null);
   const [reduceLink, setReduceLink] = useState<AccountLinkView | null>(null);
   const [unlinkConfirmLink, setUnlinkConfirmLink] = useState<AccountLinkView | null>(null);
@@ -686,6 +689,7 @@ function LinkedAccountsSectionInner({ venueName }: { venueName: string }) {
               }}
               autoOpenSetupId={setupCollectiveId}
               onSetupHandled={() => setSetupCollectiveId(null)}
+              refreshKey={collectivesRefresh}
             />
 
       {/* Notification email preferences (§17.4) ------------------------- */}
@@ -755,6 +759,7 @@ function LinkedAccountsSectionInner({ venueName }: { venueName: string }) {
             // collective may now exist, which the server-rendered sidebar shows.
             setSendInitialSlug(undefined);
             await load({ silent: true });
+            setCollectivesRefresh((n) => n + 1);
             router.refresh();
           }}
         />
@@ -782,6 +787,7 @@ function LinkedAccountsSectionInner({ venueName }: { venueName: string }) {
               );
             }
             await load({ silent: true });
+            setCollectivesRefresh((n) => n + 1);
             notifyLinkedAccountIncomingChanged();
             router.refresh();
           }}

@@ -122,6 +122,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     item_id?: string;
     reoffered?: boolean;
     links?: { link_id: string; venue_id: string; venue_name: string }[];
+    /** Members asked whether to use their own same-named service first (plan L13). */
+    pending?: { venue_id: string; venue_name: string; service_id: string }[];
   };
   const links = result.links ?? [];
   const collectiveSync = await applyLinksInline(ctx.admin, links.map((l) => l.link_id), {
@@ -155,6 +157,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             : 'current',
       })),
       collective_sync: collectiveSync,
+      pending: result.pending ?? [],
     },
     { status: 201 },
   );

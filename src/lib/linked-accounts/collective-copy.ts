@@ -919,6 +919,11 @@ export const COLLECTIVE_COPY = {
   'finish.services.selectedOne': '{count} service selected',
   'finish.services.staffOnly': 'Staff bookings only',
   'finish.services.onPage': 'Already on the page',
+  'finish.services.sameName': '{venueList} has a {service} too. They will be asked whether to use theirs for it.',
+  'finish.calendars.awaiting':
+    '{venue} has a service with the same name and has been asked whether to use it. Its calendars can be chosen once it answers, from the Collective area.',
+  'svc.offer.awaiting': '{venueList} has a service with the same name and has been asked whether to use it.',
+  'svc.cal.warn.awaiting': '{venue} has a service with the same name and has been asked whether to use it. Its calendars can offer this once it answers.',
   'finish.services.saving': 'Putting the services on the page...',
   'finish.services.waiting': 'Setting the services up at {venueList}...',
   'finish.services.failed': '{count} services could not be put on the page. You can try again from your Services page.',

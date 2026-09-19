@@ -126,7 +126,7 @@ export function CollectiveCalendarsSection({
       {loading
         ? shown.map((group) => <GroupSkeleton key={group.venue_id} name={group.venue_name} />)
         : shown.map((group) => {
-            const warnings = venueWarnings(group, reasonsByVenue.get(group.venue_id) ?? [], collectiveName);
+            const warnings = venueWarnings(group, reasonsByVenue.get(group.venue_id) ?? [], collectiveName, itemId);
             return (
               <div key={group.venue_id} className="rounded-xl border border-slate-200 bg-white p-3">
                 <div className="flex flex-wrap items-center gap-2">
@@ -292,8 +292,13 @@ export function venueWarnings(
   group: CollectiveCalendarGroup,
   reasons: CollectiveHiddenReason[],
   collectiveName: string,
+  itemId: string | null = null,
 ): string[] {
   const out: string[] = [];
+  // The venue was asked whether to use its own same-named service (plan L13): no copy until it answers.
+  if (itemId && (group.awaiting_answer ?? []).includes(itemId)) {
+    out.push(collectiveCopy('svc.cal.warn.awaiting', { venue: group.venue_name }));
+  }
   for (const venue of group.sync.pending) {
     out.push(collectiveCopy('svc.cal.warn.settingUp', { venue: venue.venue_name }));
   }

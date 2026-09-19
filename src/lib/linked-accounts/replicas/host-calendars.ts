@@ -15,6 +15,7 @@
  * replicas-model collective, which is all of them today.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { loadPendingAdoptionsByVenue } from '@/lib/linked-accounts/replicas/adoptions';
 import {
   applicableCalendarValues,
   type CalendarAssignmentRow,
@@ -44,6 +45,12 @@ export interface CollectiveCalendarGroup {
   /** How this venue's copies are doing, in the same shape as a save's answer. */
   sync: CollectiveSync;
   calendars: CollectiveCalendarEntry[];
+  /**
+   * Offerings this venue has been asked about and not answered (plan L13): it holds a same-named
+   * service, and its copy exists only once it says whether to use it. Its calendars cannot offer
+   * these yet.
+   */
+  awaiting_answer?: string[];
 }
 
 type LinkRowShape = Record<string, unknown>;
@@ -166,11 +173,14 @@ export async function loadHostCollectiveCalendars(
     assignmentsByCalendar.set(cid, [...(assignmentsByCalendar.get(cid) ?? []), row]);
   }
 
+  const awaiting = await loadPendingAdoptionsByVenue(admin, collectiveId);
+
   const groups: CollectiveCalendarGroup[] = memberVenueIds.map((memberVenueId) => ({
     venue_id: memberVenueId,
     venue_name: venueNames.get(memberVenueId) ?? 'Venue',
     is_host: memberVenueId === venueId,
     sync: venueSync(memberVenueId, venueNames.get(memberVenueId) ?? 'Venue', links),
+    awaiting_answer: [...(awaiting.get(memberVenueId) ?? [])],
     calendars: (calendarRows ?? [])
       .filter((c) => c.venue_id === memberVenueId)
       .map((c) => ({

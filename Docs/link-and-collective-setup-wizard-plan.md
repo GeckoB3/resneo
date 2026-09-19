@@ -37,6 +37,7 @@ created, how the two consents are collected, and what each side is shown next.
 | L10 | A host with no services yet adds one inside the wizard (name, length, price) rather than being sent away to the Services page. |
 | L11 | No migration. The invitation that belongs to a link request is the `venue_collective_members` row with `status = 'invited'` whose collective is hosted by the requesting venue. Both feeds derive it. |
 | L12 | Added 2026-09-19 after the first end-to-end run: **a collective with one venue in it is not live.** `collective_venue_live_state` (migration `20270219130000`) now needs two active memberships before `live` is true, so a host waiting for the other venue to accept keeps every service bookable on its own page. Parking starts the moment the second venue joins, which is when Continue setup appears. The public page and the own-page hand-over already needed two venues; this makes parking agree with them. The migration is owed to both environments. |
+| L13 | Added 2026-09-19 after the first end-to-end run: **putting a service on the page asks a member that has a same-named service.** Because a member now joins before anything is on the page, the join's same-name matching finds nothing and each later offer made a second copy beside the member's own. `collective_offer_service_core` (migration `20270219140000`) now raises the adoption question the engine already has for "Add from another venue" (`adoption_requested`, N26, `collective_answer_adoption`, the day 7 reminder and the day 14 default) instead of creating the replica, when the member holds an own, active, same-named service that follows no offering. The member's answer creates the link: its own service becomes the replica, or a new one is created. The result carries `pending` beside `links`; the host's calendar groups carry `awaiting_answer`; the setup wizard says who will be asked and which venue it is waiting on. Owed to both environments. |
 
 ## 3. The three flows
 
@@ -103,6 +104,6 @@ Existing `create.*` and `join.*` strings are reused where the screens are the sa
 
 ## 8. What did not change
 
-The permission model, the engine apart from L12, the Create and Join dialogs (still used), the Collective area, the
+The permission model, the engine apart from L12 and L13, the Create and Join dialogs (still used), the Collective area, the
 Services page. A venue that prefers the old two-step path can still send a link with any level and
 create the collective later from Create a collective.

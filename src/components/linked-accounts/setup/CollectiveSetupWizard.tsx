@@ -48,17 +48,29 @@ interface CollectiveEntry {
   members: { venueId: string; venueName: string; status: string }[];
 }
 
+interface SameNameMatch {
+  venue_id: string;
+  venue_name: string;
+  service_id: string;
+}
+
 interface Loaded {
   services: ServiceRow[];
   groups: CollectiveCalendarGroup[];
   links: CalendarLink[];
   entry: CollectiveEntry | null;
+  /** By host service id: the members that hold a same-named service and will be asked about it (plan L13). */
+  sameNames: Record<string, SameNameMatch[]>;
 }
 
 const cellKey = (serviceId: string, venueId: string, calendarId: string) => `${serviceId}:${venueId}:${calendarId}`;
 
 async function loadAll(collectiveId: string): Promise<Loaded> {
-  const [servicesRes, collectivesRes] = await Promise.all([fetch('/api/venue/appointment-services'), fetch('/api/venue/collectives')]);
+  const [servicesRes, collectivesRes, sameNamesRes] = await Promise.all([
+    fetch('/api/venue/appointment-services'),
+    fetch('/api/venue/collectives'),
+    fetch(`/api/venue/collectives/${collectiveId}/same-names`),
+  ]);
   if (!servicesRes.ok) throw new Error('services');
   const data = (await servicesRes.json()) as {
     services?: ServiceRow[];
@@ -66,11 +78,15 @@ async function loadAll(collectiveId: string): Promise<Loaded> {
     collective_calendars?: CollectiveCalendarGroup[];
   };
   const list = collectivesRes.ok ? ((await collectivesRes.json()) as { collectives?: CollectiveEntry[] }).collectives ?? [] : [];
+  const sameNames = sameNamesRes.ok
+    ? ((await sameNamesRes.json()) as { matches?: Record<string, SameNameMatch[]> }).matches ?? {}
+    : {};
   return {
     services: data.services ?? [],
     groups: data.collective_calendars ?? [],
     links: data.practitioner_services ?? [],
     entry: list.find((c) => c.id === collectiveId) ?? null,
+    sameNames,
   };
 }
 
@@ -213,6 +229,7 @@ export function CollectiveSetupWizard({
       const itemId = s.collective!.item_id!;
       for (const group of loaded.groups) {
         if (!venueReady(group, itemId)) continue;
+        if ((group.awaiting_answer ?? []).includes(itemId)) continue;
         for (const cal of group.calendars) {
           if (!cal.is_active) continue;
           const want = cells[cellKey(s.id, group.venue_id, cal.id)] === true;
@@ -457,6 +474,14 @@ export function CollectiveSetupWizard({
                             .filter(Boolean)
                             .join(' · ')}
                         </span>
+                        {!already && (loaded.sameNames[s.id] ?? []).length > 0 ? (
+                          <span className="block text-xs text-amber-800">
+                            {collectiveCopy('finish.services.sameName', {
+                              venueList: formatVenueList(loaded.sameNames[s.id]!.map((m) => m.venue_name), 2),
+                              service: s.name,
+                            })}
+                          </span>
+                        ) : null}
                       </label>
                     </li>
                   );
@@ -530,6 +555,7 @@ export function CollectiveSetupWizard({
             {loaded.groups.map((group) => {
               const active = group.calendars.filter((c) => c.is_active);
               const ready = pageServices.every((s) => venueReady(group, s.collective!.item_id!));
+              const awaiting = pageServices.filter((s) => (group.awaiting_answer ?? []).includes(s.collective!.item_id!));
               return (
                 <section key={group.venue_id} className="space-y-2 rounded-xl border border-slate-200 p-3">
                   <div className="flex flex-wrap items-center gap-2">
@@ -540,6 +566,9 @@ export function CollectiveSetupWizard({
                       </Pill>
                     ) : null}
                   </div>
+                  {awaiting.length > 0 ? (
+                    <p className="text-xs text-amber-800">{collectiveCopy('finish.calendars.awaiting', { venue: group.venue_name })}</p>
+                  ) : null}
                   {!ready ? (
                     <p className="text-xs text-amber-800">
                       {collectiveCopy('finish.calendars.notReady', { venue: group.venue_name })}{' '}
@@ -550,7 +579,7 @@ export function CollectiveSetupWizard({
                   ) : active.length === 0 ? (
                     <p className="text-xs text-slate-500">{collectiveCopy('finish.calendars.noCalendars', { venue: group.venue_name })}</p>
                   ) : (
-                    pageServices.map((s) => {
+                    pageServices.filter((s) => !awaiting.includes(s)).map((s) => {
                       const allOn = active.every((c) => cells[cellKey(s.id, group.venue_id, c.id)]);
                       return (
                         <fieldset key={s.id} className="rounded-lg bg-slate-50 px-3 py-2">
@@ -653,6 +682,7 @@ function hostServices(services: ServiceRow[]): ServiceRow[] {
 /** A venue can take calendar choices for a service once its copy of it is applied (the host always can). */
 function venueReady(group: CollectiveCalendarGroup, itemId: string): boolean {
   if (group.is_host) return true;
+  if ((group.awaiting_answer ?? []).includes(itemId)) return true; // shown as awaiting, not as not ready
   if (group.sync.pending.some((p) => p.venue_id === group.venue_id)) return false;
   if (group.sync.failed.some((f) => f.venue_id === group.venue_id)) return false;
   // A member's calendar can only list a service it holds; the host's groups carry each calendar's

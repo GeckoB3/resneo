@@ -1127,6 +1127,16 @@ are not linked automatically (owner's decision); the host may link one by hand f
 ("Link to {origin} and update"), which is confirmed and per copy. Removing and re-adding an
 offering reuses an existing same-named service unchanged. See `Docs/collective-service-sync-plan.md`.
 
+### 7.7.4 An offer asks a member with a same-named service (2026-09-19)
+
+Since migration `20270219140000` (`Docs/link-and-collective-setup-wizard-plan.md`, L13), putting a
+host service on the page does not create a replica at a member that holds an own, active service with
+the same name (trimmed, case-insensitive) that follows no offering. The member is asked instead, with
+the adoption question §7.7 already uses for "Add from another venue" (N26, use mine or keep separate,
+reminder at day 7, "keep separate" by default at day 14), and its answer creates the link. Until then
+the host's calendar groups list the offering under `awaiting_answer` for that venue, and its calendars
+cannot offer it.
+
 ### 7.8 Branding scope
 
 Collective branding applies only to `/book/c/{slug}` and to confirmation communications for

@@ -383,3 +383,85 @@ export async function runAdoptionDeadlines(
   }
   return outcome;
 }
+
+// ---------------------------------------------------------------------------
+// Same-named services (Docs/link-and-collective-setup-wizard-plan.md, L13)
+// ---------------------------------------------------------------------------
+
+/**
+ * The offerings each member has still to answer about, keyed by venue: an `adoption_requested`
+ * with no `adoption_answered` after it. One read for the whole collective, so the host's calendar
+ * groups and the setup wizard can say "waiting for {venue} to decide" without an RPC per cell.
+ */
+export async function loadPendingAdoptionsByVenue(admin: SupabaseClient, collectiveId: string): Promise<Map<string, Set<string>>> {
+  const since = new Date(Date.now() - LOOKBACK_MS).toISOString();
+  const { data } = await admin
+    .from('collective_audit_events')
+    .select('event_type, item_id, target_venue_id, created_at')
+    .eq('collective_id', collectiveId)
+    .in('event_type', ['adoption_requested', 'adoption_answered'])
+    .gte('created_at', since)
+    .order('created_at', { ascending: true });
+  // Replayed in order: a request opens the question, an answer closes it.
+  const open = new Map<string, Set<string>>();
+  for (const row of (data ?? []) as Row[]) {
+    const venueId = row.target_venue_id as string | null;
+    const itemId = row.item_id as string | null;
+    if (!venueId || !itemId) continue;
+    const set = open.get(venueId) ?? new Set<string>();
+    if (row.event_type === 'adoption_requested') set.add(itemId);
+    else set.delete(itemId);
+    open.set(venueId, set);
+  }
+  return open;
+}
+
+export interface SameNameMatch {
+  venue_id: string;
+  venue_name: string;
+  service_id: string;
+}
+
+/**
+ * For each of the host's active services, the members that hold an own, active service with the
+ * same name (trimmed, case-insensitive) that follows no offering yet: the venues the engine will ask
+ * when the host puts that service on the page. Keyed by the host's service id.
+ */
+export async function loadSameNameMatches(
+  admin: SupabaseClient,
+  collectiveId: string,
+  hostVenueId: string,
+): Promise<Record<string, SameNameMatch[]>> {
+  const { data: members } = await admin
+    .from('venue_collective_members')
+    .select('venue_id, venues!venue_id (name)')
+    .eq('collective_id', collectiveId)
+    .eq('status', 'active')
+    .neq('venue_id', hostVenueId);
+  const memberNames = new Map<string, string>();
+  for (const row of (members ?? []) as Row[]) {
+    const joined = row.venues as { name?: string } | { name?: string }[] | null;
+    memberNames.set(row.venue_id as string, (Array.isArray(joined) ? joined[0]?.name : joined?.name) ?? 'Venue');
+  }
+  if (memberNames.size === 0) return {};
+  const [{ data: hostServices }, { data: memberServices }, { data: replicas }] = await Promise.all([
+    admin.from('service_items').select('id, name').eq('venue_id', hostVenueId).eq('is_active', true),
+    admin.from('service_items').select('id, name, venue_id').in('venue_id', [...memberNames.keys()]).eq('is_active', true),
+    admin.from('collective_service_replicas').select('replica_service_id').in('venue_id', [...memberNames.keys()]).is('released_at', null),
+  ]);
+  const following = new Set(((replicas ?? []) as Row[]).map((r) => r.replica_service_id as string | null).filter(Boolean));
+  const out: Record<string, SameNameMatch[]> = {};
+  for (const host of (hostServices ?? []) as Row[]) {
+    const wanted = sameName(host.name as string);
+    const matches: SameNameMatch[] = [];
+    for (const mine of (memberServices ?? []) as Row[]) {
+      if (following.has(mine.id as string)) continue;
+      if (sameName(mine.name as string) !== wanted) continue;
+      const venueId = mine.venue_id as string;
+      if (matches.some((m) => m.venue_id === venueId)) continue;
+      matches.push({ venue_id: venueId, venue_name: memberNames.get(venueId) ?? 'Venue', service_id: mine.id as string });
+    }
+    if (matches.length > 0) out[host.id as string] = matches;
+  }
+  return out;
+}

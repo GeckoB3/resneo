@@ -34,6 +34,7 @@ export function SuperSidebar({ email }: Props) {
       heading: 'Manage',
       items: [
         { href: '/super/salespeople', label: 'Salespeople' },
+        { href: '/super/contact-users', label: 'Contact Users' },
         { href: '/super/announcements', label: 'Announcements' },
         { href: '/super/flags', label: 'Feature flags' },
         { href: '/super/users', label: 'Superusers' },

@@ -33,6 +33,12 @@ interface SendEmailOptions {
    * `*.sendgrid.net` / branded redirect hosts and breaks Supabase PKCE verification.
    */
   disableTracking?: boolean;
+  /**
+   * Extra message headers, e.g. `List-Unsubscribe` / `List-Unsubscribe-Post` for bulk mail.
+   */
+  headers?: Record<string, string>;
+  /** SendGrid categories, for filtering in the SendGrid activity feed. */
+  categories?: string[];
 }
 
 /**
@@ -63,6 +69,8 @@ export async function sendEmail(opts: SendEmailOptions): Promise<string | null> 
       subject: opts.subject,
       text: opts.text,
       html: opts.html,
+      ...(opts.headers && Object.keys(opts.headers).length > 0 ? { headers: opts.headers } : {}),
+      ...(opts.categories && opts.categories.length > 0 ? { categories: opts.categories } : {}),
       ...(opts.disableTracking
         ? {
             trackingSettings: {

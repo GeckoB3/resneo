@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { resolveLinkAdmin } from '@/lib/linked-accounts/route-helpers';
 import { evaluateLinkEligibility } from '@/lib/linked-accounts/eligibility';
 import { findLiveLinkBetween } from '@/lib/linked-accounts/queries';
+import { collectiveStandingBetween } from '@/lib/linked-accounts/collective-standing';
 
 /**
  * GET /api/venue/account-links/lookup?slug=... — Admin-only venue lookup for the
@@ -40,6 +41,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         found: true,
         eligible: false,
+        alreadyLinked: false,
         name: venue.name as string,
         slug: venue.slug as string,
         reason: 'This is your own venue.',
@@ -56,6 +58,7 @@ export async function GET(request: NextRequest) {
 
     let reason: string | null = null;
     let eligible = true;
+    let alreadyLinked = false;
     if (!eligibility.feature) {
       eligible = false;
       reason = 'This venue cannot use linked accounts.';
@@ -66,6 +69,7 @@ export async function GET(request: NextRequest) {
       const existing = await findLiveLinkBetween(ctx.admin, ctx.venueId, venueId);
       if (existing) {
         eligible = false;
+        alreadyLinked = existing.status !== 'pending';
         reason =
           existing.status === 'pending'
             ? 'There is already a pending request with this venue.'
@@ -73,12 +77,21 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // The setup wizard asks for the venue's standing for a collective too (plan §3.1), so the
+    // collective step can be disabled with the reason before anything is sent.
+    const collective =
+      request.nextUrl.searchParams.get('collective') === '1'
+        ? await collectiveStandingBetween(ctx.admin, ctx.venueId, venueId)
+        : undefined;
+
     return NextResponse.json({
       found: true,
       eligible,
+      alreadyLinked,
       name: venue.name as string,
       slug: venue.slug as string,
       reason,
+      ...(collective ? { collective } : {}),
     });
   } catch (err) {
     console.error('GET /api/venue/account-links/lookup failed:', err);

@@ -61,6 +61,6 @@ describe('GET /api/venue/collectives/[id]/join', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('Cache-Control')).toBe('no-store');
     expect(await response.json()).toEqual({ collective_name: 'Northside' });
-    expect(mockPreview).toHaveBeenCalledWith(expect.anything(), 'collective-1', 'venue-me');
+    expect(mockPreview).toHaveBeenCalledWith(expect.anything(), 'collective-1', 'venue-me', { allowPendingLink: false });
   });
 });

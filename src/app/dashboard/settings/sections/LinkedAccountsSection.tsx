@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { Pill } from '@/components/ui/dashboard/Pill';
@@ -16,6 +16,12 @@ import {
 } from '@/components/linked-accounts/linked-accounts-ui';
 import { LinkedAccountAuditModal } from '@/components/linked-accounts/LinkedAccountAuditModal';
 import { VenueCollectivesPanel } from '@/components/linked-accounts/VenueCollectivesPanel';
+import { LinkSetupWizard } from '@/components/linked-accounts/setup/LinkSetupWizard';
+import {
+  ReviewLinkRequestDialog,
+  type ProposedCollectiveSummary,
+} from '@/components/linked-accounts/setup/ReviewLinkRequestDialog';
+import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 import { NotificationPrefsCard } from '@/components/linked-accounts/NotificationPrefsCard';
 import { ConfirmDialog } from '@/components/ui/primitives/ConfirmDialog';
 import { ToastProvider, useToast } from '@/components/ui/Toast';
@@ -27,7 +33,6 @@ import {
   normaliseGrant,
 } from '@/lib/linked-accounts/permissions';
 import {
-  DEFAULT_LINK_GRANT,
   LINK_COUNT_SOFT_WARNING,
   type AccountLinkView,
   type LinkGrant,
@@ -41,6 +46,8 @@ interface ApiData {
   links: AccountLinkView[];
   outgoingPendingCount: number;
   maxOutgoingPending: number;
+  /** The collective invitation that rides on a pending request, by link id (plan L11). */
+  proposedCollectives?: Record<string, ProposedCollectiveSummary>;
 }
 
 function formatDate(iso: string | null): string {
@@ -145,6 +152,10 @@ function LinkedAccountsSectionInner({ venueName }: { venueName: string }) {
   const [sendInitialSlug, setSendInitialSlug] = useState<string | undefined>(undefined);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [reviewLink, setReviewLink] = useState<AccountLinkView | null>(null);
+  // Deep links from the dashboard banner: `?review={linkId}` opens that request, `?setup={collectiveId}`
+  // opens the host's finish-setting-up wizard (Docs/link-and-collective-setup-wizard-plan.md §4).
+  const [pendingReviewId, setPendingReviewId] = useState<string | null>(null);
+  const [setupCollectiveId, setSetupCollectiveId] = useState<string | null>(null);
   const [editLink, setEditLink] = useState<AccountLinkView | null>(null);
   const [reduceLink, setReduceLink] = useState<AccountLinkView | null>(null);
   const [unlinkConfirmLink, setUnlinkConfirmLink] = useState<AccountLinkView | null>(null);
@@ -178,6 +189,16 @@ function LinkedAccountsSectionInner({ venueName }: { venueName: string }) {
   // pre-fill a request back to the initiating venue. Runs once; clears the param.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    const review = params.get('review');
+    const setup = params.get('setup');
+    if (review || setup) {
+      params.delete('review');
+      params.delete('setup');
+      const rest = params.toString();
+      window.history.replaceState(null, '', `${window.location.pathname}${rest ? `?${rest}` : ''}`);
+      if (review) setPendingReviewId(review);
+      if (setup) setSetupCollectiveId(setup);
+    }
     const token = params.get('invite');
     if (!token) return;
     params.delete('invite');
@@ -252,6 +273,14 @@ function LinkedAccountsSectionInner({ venueName }: { venueName: string }) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Once the links are here, open the request the banner pointed at.
+  useEffect(() => {
+    if (!pendingReviewId || !data) return;
+    const match = data.links.find((l) => l.id === pendingReviewId && l.status === 'pending' && !l.initiatedByMe);
+    setPendingReviewId(null);
+    if (match) setReviewLink(match);
+  }, [pendingReviewId, data]);
 
   /** Run a link mutation with per-row busy state, toasts, and inline error. */
   const runLinkAction = useCallback(
@@ -396,7 +425,7 @@ function LinkedAccountsSectionInner({ venueName }: { venueName: string }) {
                 setSendOpen(true);
               }}
             >
-              Send your first link request
+              Link with your first venue
             </button>
           ) : (
             <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
@@ -432,7 +461,7 @@ function LinkedAccountsSectionInner({ venueName }: { venueName: string }) {
                   setSendOpen(true);
                 }}
               >
-                Send link request
+                {collectiveCopy('setup.title')}
               </button>
             </div>
           }
@@ -559,6 +588,11 @@ function LinkedAccountsSectionInner({ venueName }: { venueName: string }) {
                       <p className="text-xs text-slate-600">
                         Requested {formatDate(link.createdAt)}
                       </p>
+                      {data.proposedCollectives?.[link.id] ? (
+                        <p className="text-xs font-medium text-brand-700">
+                          Also invites you to join {data.proposedCollectives[link.id]!.name}, a shared booking page.
+                        </p>
+                      ) : null}
                     </div>
                     <button
                       type="button"
@@ -630,7 +664,17 @@ function LinkedAccountsSectionInner({ venueName }: { venueName: string }) {
       </SectionCard>
 
       {/* Venue collectives (Phase 2) ----------------------------------- */}
-            <VenueCollectivesPanel venueName={venueName} activeLinks={activeLinks} />
+            <VenueCollectivesPanel
+              venueName={venueName}
+              activeLinks={activeLinks}
+              pendingLinkByHost={Object.fromEntries(receivedRequests.map((l) => [l.otherVenue.id, l.id]))}
+              onReviewLink={(linkId) => {
+                setActionError(null);
+                setReviewLink(links.find((l) => l.id === linkId) ?? null);
+              }}
+              autoOpenSetupId={setupCollectiveId}
+              onSetupHandled={() => setSetupCollectiveId(null)}
+            />
 
       {/* Notification email preferences (§17.4) ------------------------- */}
       <NotificationPrefsCard />
@@ -685,7 +729,9 @@ function LinkedAccountsSectionInner({ venueName }: { venueName: string }) {
 
       {/* Modals --------------------------------------------------------- */}
       {sendOpen ? (
-        <SendRequestModal
+        <LinkSetupWizard
+          venueName={venueName}
+          venueSlug={data.venue.slug || null}
           myCalendars={myCalendars}
           initialSlug={sendInitialSlug}
           onClose={() => {
@@ -693,9 +739,11 @@ function LinkedAccountsSectionInner({ venueName }: { venueName: string }) {
             setSendInitialSlug(undefined);
           }}
           onSent={async () => {
-            setSendOpen(false);
+            // The wizard stays open on its receipt step; the lists behind it refresh now. A
+            // collective may now exist, which the server-rendered sidebar shows.
             setSendInitialSlug(undefined);
             await load();
+            router.refresh();
           }}
         />
       ) : null}
@@ -703,14 +751,26 @@ function LinkedAccountsSectionInner({ venueName }: { venueName: string }) {
       {inviteOpen ? <InviteLinkModal onClose={() => setInviteOpen(false)} /> : null}
 
       {reviewLink ? (
-        <ReviewRequestModal
+        <ReviewLinkRequestDialog
           link={reviewLink}
+          venueName={venueName}
           myCalendars={myCalendars}
+          collective={data.proposedCollectives?.[reviewLink.id] ?? null}
           onClose={() => setReviewLink(null)}
-          onDone={async () => {
+          onDone={async (outcome) => {
             setReviewLink(null);
+            if (outcome.joinError && outcome.collectiveName) {
+              setActionError(
+                collectiveCopy('respond.done.joinFailed', {
+                  venue: reviewLink.otherVenue.name,
+                  collective: outcome.collectiveName,
+                  error: outcome.joinError,
+                }),
+              );
+            }
             await load();
             notifyLinkedAccountIncomingChanged();
+            router.refresh();
           }}
         />
       ) : null}
@@ -934,296 +994,6 @@ function ActiveLinkRow({
   );
 }
 
-interface VenuePick {
-  name: string;
-  slug: string;
-  eligible: boolean;
-  reason: string | null;
-}
-
-function SendRequestModal({
-  onClose,
-  onSent,
-  myCalendars,
-  initialSlug,
-}: {
-  onClose: () => void;
-  onSent: () => void;
-  myCalendars: { id: string; name: string }[];
-  /** §20 — pre-select this venue (from a shareable invite link). */
-  initialSlug?: string;
-}) {
-  const { addToast } = useToast();
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<VenuePick[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [searched, setSearched] = useState(false);
-  const [truncated, setTruncated] = useState(false);
-  const [activeIndex, setActiveIndex] = useState(-1);
-  const [selected, setSelected] = useState<VenuePick | null>(null);
-  const [message, setMessage] = useState('');
-  const [mine, setMine] = useState<LinkGrant>(DEFAULT_LINK_GRANT);
-  const [theirs, setTheirs] = useState<LinkGrant>(DEFAULT_LINK_GRANT);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  // §20 — resolve a venue handed in via an invite link, once on mount.
-  const prefilledRef = useRef(false);
-  useEffect(() => {
-    const slug = initialSlug?.trim().toLowerCase();
-    if (!slug || prefilledRef.current) return;
-    prefilledRef.current = true;
-    (async () => {
-      try {
-        const res = await fetch(`/api/venue/account-links/lookup?slug=${encodeURIComponent(slug)}`);
-        const json = await res.json();
-        if (res.ok && json.found) {
-          setSelected({
-            name: json.name ?? slug,
-            slug: json.slug ?? slug,
-            eligible: Boolean(json.eligible),
-            reason: json.reason ?? null,
-          });
-        }
-      } catch {
-        /* fall back to manual search */
-      }
-    })();
-  }, [initialSlug]);
-
-  // Debounced search-by-name (also matches slug, so typing a full slug works).
-  useEffect(() => {
-    const term = query.trim();
-    if (selected || term.length < 2) {
-      setResults([]);
-      setSearched(false);
-      return;
-    }
-    let cancelled = false;
-    setSearching(true);
-    const t = setTimeout(async () => {
-      try {
-        const res = await fetch(`/api/venue/account-links/search?q=${encodeURIComponent(term)}`);
-        const json = await res.json();
-        if (!cancelled) {
-          setResults(res.ok ? (json.results ?? []) : []);
-          setTruncated(Boolean(json.truncated));
-          setActiveIndex(-1);
-          setSearched(true);
-        }
-      } catch {
-        if (!cancelled) {
-          setResults([]);
-          setSearched(true);
-        }
-      } finally {
-        if (!cancelled) setSearching(false);
-      }
-    }, 300);
-    return () => {
-      cancelled = true;
-      clearTimeout(t);
-    };
-  }, [query, selected]);
-
-  const choose = (pick: VenuePick) => {
-    setSelected(pick);
-    setResults([]);
-    setSearched(false);
-    setQuery('');
-  };
-
-  const clearSelection = () => {
-    setSelected(null);
-    setErr(null);
-  };
-
-  const canSubmit =
-    !busy &&
-    selected?.eligible === true &&
-    (normaliseGrant(mine).calendar !== 'none' || normaliseGrant(theirs).calendar !== 'none');
-
-  const onSearchKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
-    if (results.length === 0) return;
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setActiveIndex((i) => (i + 1) % results.length);
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setActiveIndex((i) => (i <= 0 ? results.length - 1 : i - 1));
-    } else if (e.key === 'Enter' && activeIndex >= 0) {
-      e.preventDefault();
-      choose(results[activeIndex]);
-    }
-  };
-
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      busy={busy}
-      title="Send a link request"
-      description="Search for the venue by name, or paste its booking-page address."
-    >
-      <div className="space-y-4">
-        {selected ? (
-          <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-slate-900">{selected.name}</p>
-                <p className="truncate text-xs text-slate-500">/{selected.slug}</p>
-              </div>
-              <button
-                type="button"
-                onClick={clearSelection}
-                disabled={busy}
-                className="shrink-0 text-xs font-semibold text-brand-700 hover:text-brand-800 disabled:opacity-50"
-              >
-                Change
-              </button>
-            </div>
-            {!selected.eligible ? (
-              <p className="mt-2 rounded-lg bg-rose-50 px-2.5 py-1.5 text-xs font-medium text-rose-700">
-                {selected.reason ?? 'This venue isn’t available to link right now.'}
-              </p>
-            ) : null}
-          </div>
-        ) : (
-          <div className="relative">
-            <label className="block">
-              <span className="block text-sm font-medium text-slate-700">Find a venue</span>
-              <input
-                type="text"
-                role="combobox"
-                aria-expanded={results.length > 0}
-                aria-controls="venue-search-results"
-                aria-autocomplete="list"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={onSearchKeyDown}
-                placeholder="Venue name or booking-page address"
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                autoFocus
-                autoComplete="off"
-              />
-            </label>
-            {searching ? (
-              <p className="mt-1 text-xs text-slate-500">Searching…</p>
-            ) : searched && results.length === 0 ? (
-              <p className="mt-1 text-xs text-slate-500">
-                No venues found. Check the name or ask them for their booking-page address.
-              </p>
-            ) : null}
-            {results.length > 0 ? (
-              <ul
-                id="venue-search-results"
-                role="listbox"
-                className="mt-2 max-h-60 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-sm"
-              >
-                {results.map((r, i) => (
-                  <li key={r.slug} role="option" aria-selected={i === activeIndex}>
-                    <button
-                      type="button"
-                      onClick={() => choose(r)}
-                      onMouseEnter={() => setActiveIndex(i)}
-                      className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm ${
-                        i === activeIndex ? 'bg-brand-50' : 'hover:bg-slate-50'
-                      } ${i > 0 ? 'border-t border-slate-100' : ''}`}
-                    >
-                      <span className="min-w-0">
-                        <span className="block truncate font-medium text-slate-900">{r.name}</span>
-                        <span className="block truncate text-xs text-slate-500">/{r.slug}</span>
-                      </span>
-                      {r.eligible ? (
-                        <span className="shrink-0 text-[11px] font-semibold text-emerald-600">
-                          Available
-                        </span>
-                      ) : (
-                        <span className="shrink-0 text-[11px] font-medium text-slate-400">
-                          Unavailable
-                        </span>
-                      )}
-                    </button>
-                  </li>
-                ))}
-                {truncated ? (
-                  <li className="border-t border-slate-100 px-3 py-1.5 text-[11px] text-slate-400">
-                    Showing the first {results.length}. Refine your search to narrow it down.
-                  </li>
-                ) : null}
-              </ul>
-            ) : null}
-          </div>
-        )}
-
-        <label className="block">
-          <span className="block text-sm font-medium text-slate-700">
-            Personal note (optional)
-          </span>
-          <textarea
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            rows={2}
-            maxLength={1000}
-            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-            placeholder="Add a short message for the other venue"
-          />
-        </label>
-
-        <GrantPairEditor
-          otherVenueName={selected?.name ?? 'the other venue'}
-          mine={mine}
-          theirs={theirs}
-          onChangeMine={setMine}
-          onChangeTheirs={setTheirs}
-          disabled={busy}
-          myCalendars={myCalendars}
-        />
-
-        {err ? <ActionError message={err} /> : null}
-
-        <div className="flex justify-end gap-2">
-          <button type="button" className={btnSecondary} disabled={busy} onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className={btnPrimary}
-            disabled={!canSubmit}
-            onClick={async () => {
-              if (!selected) return;
-              setBusy(true);
-              setErr(null);
-              try {
-                const res = await fetch('/api/venue/account-links', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    targetSlug: selected.slug,
-                    requestMessage: message.trim() || undefined,
-                    grants: { mine, theirs },
-                  }),
-                });
-                const json = await res.json();
-                if (!res.ok) throw new Error(json.error ?? 'Failed to send request.');
-                addToast(`Link request sent to ${selected.name}.`, 'success');
-                onSent();
-              } catch (e) {
-                const msg = e instanceof Error ? e.message : 'Failed to send request.';
-                setErr(msg);
-                addToast(msg, 'error');
-                setBusy(false);
-              }
-            }}
-          >
-            {busy ? 'Sending…' : 'Send request'}
-          </button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
 /** §20 — generate and share a one-time, 30-day invite link (copy + QR). */
 function InviteLinkModal({ onClose }: { onClose: () => void }) {
   const { addToast } = useToast();
@@ -1318,152 +1088,6 @@ function InviteLinkModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
       ) : null}
-    </Modal>
-  );
-}
-
-function ReviewRequestModal({
-  link,
-  onClose,
-  onDone,
-  myCalendars,
-}: {
-  link: AccountLinkView;
-  onClose: () => void;
-  onDone: () => void;
-  myCalendars: { id: string; name: string }[];
-}) {
-  const { addToast } = useToast();
-  const [editing, setEditing] = useState(false);
-  // mine = what my venue grants the other; theirs = what I get from them.
-  const [mine, setMine] = useState<LinkGrant>(link.theyCan);
-  const [theirs, setTheirs] = useState<LinkGrant>(link.iCan);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  const SUCCESS_COPY: Record<string, string> = {
-    accept: `You're now linked with ${link.otherVenue.name}.`,
-    accept_with_changes: `Linked with ${link.otherVenue.name} with your adjustments.`,
-    reject: `Declined ${link.otherVenue.name}'s request.`,
-  };
-
-  const respond = async (action: string, grants?: { mine: LinkGrant; theirs: LinkGrant }) => {
-    setBusy(true);
-    setErr(null);
-    try {
-      const res = await fetch(`/api/venue/account-links/${link.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, grants }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? 'Failed to respond.');
-      addToast(SUCCESS_COPY[action] ?? 'Done.', 'success');
-      onDone();
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed to respond.';
-      setErr(msg);
-      addToast(msg, 'error');
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      busy={busy}
-      title={`${link.otherVenue.name} wants to link with you`}
-      description="Review what each venue would be able to do, then accept, adjust, or reject."
-    >
-      {link.requestMessage ? (
-        <p className="mb-3 rounded-lg bg-slate-50 px-3 py-2 text-sm italic text-slate-700">
-          “{link.requestMessage}”
-        </p>
-      ) : null}
-
-      {editing ? (
-        <div className="space-y-3">
-          <GrantPairEditor
-            otherVenueName={link.otherVenue.name}
-            mine={mine}
-            theirs={theirs}
-            onChangeMine={setMine}
-            onChangeTheirs={setTheirs}
-            disabled={busy}
-            myCalendars={myCalendars}
-          />
-          {/* §19.2 — the data-sharing notice must appear here too, not only in the plain accept view. */}
-          <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-            Linking is a controller-to-controller data-sharing arrangement. Each venue stays the
-            data controller for its own clients. You can reduce access or unlink at any time.
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-2 text-sm text-slate-700">
-          <p>
-            <span className="font-semibold">{link.otherVenue.name} will be able to:</span>{' '}
-            {describeGrant(link.theyCan).join(', ')}.
-          </p>
-          <p>
-            <span className="font-semibold">You will be able to:</span>{' '}
-            {describeGrant(link.iCan).join(', ')}.
-          </p>
-          <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-            Linking is a controller-to-controller data-sharing arrangement. Each venue stays the
-            data controller for its own clients. You can reduce access or unlink at any time.
-          </p>
-        </div>
-      )}
-
-      {err ? <div className="mt-3"><ActionError message={err} /></div> : null}
-
-      <div className="mt-4 flex flex-wrap justify-end gap-2">
-        <button type="button" className={btnSecondary} disabled={busy} onClick={onClose}>
-          Close
-        </button>
-        <button
-          type="button"
-          className={btnDanger}
-          disabled={busy}
-          onClick={() => respond('reject')}
-        >
-          Reject
-        </button>
-        {editing ? (
-          <button
-            type="button"
-            className={btnPrimary}
-            disabled={
-              busy ||
-              (normaliseGrant(mine).calendar === 'none' &&
-                normaliseGrant(theirs).calendar === 'none')
-            }
-            onClick={() => respond('accept_with_changes', { mine, theirs })}
-          >
-            {busy ? 'Saving…' : 'Save & accept'}
-          </button>
-        ) : (
-          <>
-            <button
-              type="button"
-              className={btnSecondary}
-              disabled={busy}
-              onClick={() => setEditing(true)}
-            >
-              Accept with changes
-            </button>
-            <button
-              type="button"
-              className={btnPrimary}
-              disabled={busy}
-              onClick={() => respond('accept')}
-            >
-              {busy ? 'Accepting…' : 'Accept'}
-            </button>
-          </>
-        )}
-      </div>
     </Modal>
   );
 }

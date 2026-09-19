@@ -5,6 +5,7 @@ import { withCronRunLogging } from '@/lib/platform/cron-log';
 import { evaluateLinkEligibility } from '@/lib/linked-accounts/eligibility';
 import {
   notifyLinkExpired,
+  notifyProposedCollectiveClosed,
   notifyLinkLapseExpired,
   notifyLinkLapseWarning,
   notifyLinkResumed,
@@ -16,6 +17,7 @@ import {
   SUSPENDED_LINK_EXPIRY_DAYS,
 } from '@/lib/linked-accounts/types';
 import { reconcileCollectivesAfterLinkChange } from '@/lib/linked-accounts/collectives';
+import { closeInvitationForLink } from '@/lib/linked-accounts/proposed-collectives';
 import { finalizeCronRun } from '@/lib/cron/finalize-cron-run';
 
 interface VenueState {
@@ -104,7 +106,7 @@ async function handleGet(request: NextRequest) {
     ).toISOString();
     const { data: stale } = await admin
       .from('account_links')
-      .select('id, venue_low_id, venue_high_id')
+      .select('id, venue_low_id, venue_high_id, requested_by_venue_id')
       .eq('status', 'pending')
       .lt('created_at', cutoff);
     for (const link of stale ?? []) {
@@ -121,9 +123,31 @@ async function handleGet(request: NextRequest) {
           getVenue(link.venue_low_id as string),
           getVenue(link.venue_high_id as string),
         ]);
+        // A collective invitation that rode on the request closes with it (plan L7); the requester
+        // hears about both in one notice, the other venue about the link as before.
+        const requesterId = link.requested_by_venue_id as string;
+        const inviteeId = requesterId === link.venue_low_id ? (link.venue_high_id as string) : (link.venue_low_id as string);
+        const closed = await closeInvitationForLink(admin, {
+          hostVenueId: requesterId,
+          inviteeVenueId: inviteeId,
+          reason: 'expired',
+          actorVenueId: null,
+          actorUserId: null,
+        });
+        const requesterName = requesterId === link.venue_low_id ? low?.name : high?.name;
+        const inviteeName = requesterId === link.venue_low_id ? high?.name : low?.name;
         await tallyEmails([
-          notifyLinkExpired(admin, link.venue_low_id as string, high?.name ?? 'the other venue'),
-          notifyLinkExpired(admin, link.venue_high_id as string, low?.name ?? 'the other venue'),
+          closed.closed && closed.collectiveName
+            ? notifyProposedCollectiveClosed(
+                admin,
+                requesterId,
+                inviteeName ?? 'the other venue',
+                closed.collectiveName,
+                'expired',
+                closed.dissolved,
+              ).then(() => ({ emailFailures: 0 }))
+            : notifyLinkExpired(admin, requesterId, inviteeName ?? 'the other venue'),
+          notifyLinkExpired(admin, inviteeId, requesterName ?? 'the other venue'),
         ]);
         results.expired_requests++;
       } catch (err) {

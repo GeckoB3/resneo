@@ -484,6 +484,7 @@ export const COLLECTIVE_COPY = {
   'create.venues.blocked.timezone': 'In {timezone}, not {yourTimezone}',
   'create.venues.blocked.currency': 'Uses {currency}, not {yourCurrency}',
   'create.venues.blocked.plan': 'Their plan does not include collectives',
+  'create.venues.blocked.bookingModel': 'Takes bookings in a different way from you',
   'create.venues.blocked.permissions': 'Your link with {venue} does not share full calendar details yet.',
   'create.venues.fixPermissions': "Change the link's permissions",
   'create.venues.selected': '{count} venues selected',
@@ -772,6 +773,183 @@ export const COLLECTIVE_COPY = {
   'svc.commercial.confirm': 'Save and update',
   'diff.row': '{label}: {from} to {to}',
   'diff.none': 'None',
+
+  // One setup flow for linking and starting a collective (Docs/link-and-collective-setup-wizard-plan.md)
+  // The dashboard banner
+  'banner.request': '{venue} wants to link with your venue.',
+  'banner.requestWithCollective': '{venue} wants to link with your venue and start {collective}, a shared booking page.',
+  'banner.change': '{venue} proposed a permission change to your link.',
+  'banner.setup': '{venueList} joined {collective}. Two short steps make your shared booking page live.',
+  'banner.review.cta': 'Review request',
+  'banner.change.cta': 'Review change',
+  'banner.setup.cta': 'Continue setup',
+  'banner.dismiss': 'Dismiss for 24h',
+
+  // Sending: the Link with a venue wizard
+  'setup.title': 'Link with a venue',
+  'setup.step': 'Step {n} of {total}',
+  'setup.venue.heading': 'Which venue?',
+  'setup.venue.help': 'Search by name, or paste their booking page address.',
+  'setup.venue.alreadyLinked':
+    'You are already linked with {venue}. To start a collective together, use Create a collective on this tab.',
+  'setup.level.heading': 'How closely will you work together?',
+  'setup.level.help':
+    'This sets what each venue can see and do in the other\u2019s calendar. {venue} can adjust it before accepting, and either of you can change or end the link at any time.',
+  'setup.level.mutual': 'The same both ways',
+  'setup.level.customise': 'Customise permissions',
+  'setup.level.custom': 'Custom permissions',
+  'setup.level.customNote': 'A collective needs full access both ways, with no calendar limits.',
+  'setup.collective.heading': 'Share one booking page?',
+  'setup.collective.intro':
+    'With full access both ways you can also start a collective: one public booking page where clients book either venue as one business.',
+  'setup.collective.no': 'Just link for now',
+  'setup.collective.no.body': 'You can start a collective later from this tab.',
+  'setup.collective.yes': 'Also start a collective',
+  'setup.collective.yes.body': 'You will be the host. {venue} is asked to join when they accept the link.',
+  'setup.collective.blocked': 'A collective with {venue} is not possible yet: {reason}',
+  'setup.note.label': 'A note for {venue} (optional)',
+  'setup.note.placeholder': 'Say hello, and why you want to link.',
+  'setup.check.heading': 'Check and send',
+  'setup.check.venue': 'Venue',
+  'setup.check.level': 'Level of link',
+  'setup.check.collective': 'Collective',
+  'setup.check.collective.none': 'Not this time',
+  'setup.check.collective.value': '{collective}, at /book/c/{slug}',
+  'setup.check.note': 'Your note',
+  'setup.check.whatTheyRead': 'What {venue} will read',
+  'setup.check.theyCan': '{venue} will be able to:',
+  'setup.check.youCan': 'You will be able to:',
+  'setup.cta.send': 'Send request',
+  'setup.cta.sending': 'Sending...',
+  'setup.done.title': 'Request sent to {venue}',
+  'setup.done.body': 'They have an email and a notice on their dashboard. Nothing changes until they accept.',
+  'setup.done.next.link': 'When {venue} accepts, the link starts straight away.',
+  'setup.done.next.collective':
+    'When {venue} accepts, they join {collective} and a banner on your dashboard shows you how to finish the page: choose the services, then the calendars.',
+  'setup.done.next.where': 'The request is listed under Pending requests on this tab. You can cancel it there.',
+  'setup.done.close': 'Done',
+  'setup.disabled.venue': 'Choose a venue to continue.',
+  'setup.disabled.level': 'A link must grant access in at least one direction.',
+  'setup.disabled.collective': 'Choose whether to start a collective.',
+  'setup.changes.clients.body':
+    "The link you are sending is what lets the two venues see each other's client records and bookings, at the level you chose. {collective} does not change that link, and leaving or ending {collective} does not end it. Its reports show every venue's takings, each named.",
+
+  // Responding: the request the other venue reviews
+  'respond.title': '{venue} wants to link with you',
+  'respond.titleWithCollective': '{venue} wants to link with you and start {collective}',
+  'respond.step': 'Step {n} of {total}',
+  'respond.request.heading': 'What {venue} is asking',
+  'respond.request.theyCan': '{venue} will be able to:',
+  'respond.request.youCan': 'You will be able to:',
+  'respond.request.adjust': 'Adjust permissions',
+  'respond.request.adjust.note':
+    'Changes to what you share apply as soon as you accept. Asking {venue} to share more is sent to them to agree.',
+  'respond.request.dpa':
+    'Linking is a controller-to-controller data-sharing arrangement. Each venue stays the data controller for its own clients. You can reduce access or unlink at any time.',
+  'respond.collective.heading': 'The shared booking page',
+  'respond.collective.intro':
+    '{venue} has also invited you to join {collective}, one booking page for both venues. Here is what that means for {me}.',
+  'respond.collective.needsFull':
+    'Joining {collective} needs full access both ways with no calendar limits. With the permissions you chose you can accept the link only, and join later once the link grants full access.',
+  'respond.collective.linkOnly': 'Accept the link only',
+  'respond.collective.linkOnly.note': 'The link starts now. The invitation to {collective} stays open on this tab for later.',
+  'respond.check.heading': 'Check and accept',
+  'respond.check.link': 'The link with {venue} starts as soon as you accept.',
+  'respond.consent':
+    'I understand what {venue} will be able to see and do, and that {me} joins {collective}: guests who open my booking page land on the {collective} page, {venue} manages the services on it, and through this link the venues can see each other\u2019s clients, bookings and takings.',
+  'respond.consent.linkOnly': 'I understand what {venue} will be able to see and do with {me}\u2019s data.',
+  'respond.cta.accept': 'Accept',
+  'respond.cta.acceptJoin': 'Accept and join {collective}',
+  'respond.cta.accepting': 'Accepting...',
+  'respond.cta.decline': 'Decline',
+  'respond.cta.next': 'Next',
+  'respond.cta.back': 'Back',
+  'respond.decline.title': 'Decline {venue}\u2019s request?',
+  'respond.decline.body': 'No link is made. {venue} is told, without a reason.',
+  'respond.decline.bodyWithCollective': 'No link is made and the invitation to {collective} closes. {venue} is told, without a reason.',
+  'respond.decline.confirm': 'Decline request',
+  'respond.done.linked': 'You are now linked with {venue}.',
+  'respond.done.joined': 'You are now linked with {venue} and part of {collective}. {venue} is setting up the page.',
+  'respond.done.joinFailed':
+    'The link with {venue} is active, but joining {collective} did not finish: {error} You can join from the collective\u2019s row on this tab.',
+  'respond.loading': 'Loading the request...',
+
+  // Finishing: the host puts services and calendars on the page
+  'finish.title': 'Finish setting up {collective}',
+  'finish.step': 'Step {n} of {total}',
+  'finish.intro.heading': '{venueList} is in',
+  'finish.intro.body':
+    'Two steps make the {collective} page live. First choose which of your services it offers. Then choose which calendars, at each venue, do them.',
+  'finish.intro.owns':
+    'Each venue keeps its own bookings, clients and payments. You manage the services on the page; every venue can choose its own calendars.',
+  'finish.services.heading': 'Which services go on the page?',
+  'finish.services.help':
+    'These are your services. Guests see them on the {collective} page, and every venue\u2019s calendars can offer them. Untick any you want to keep off the page for now.',
+  'finish.services.none.title': 'You have no services yet',
+  'finish.services.none.body':
+    'Add your first service here. Descriptions, photos and more can be added later on your Services page.',
+  'finish.services.add': 'Add a service',
+  'finish.services.add.name': 'Service name',
+  'finish.services.add.duration': 'Length in minutes',
+  'finish.services.add.price': 'Price',
+  'finish.services.add.cta': 'Add service',
+  'finish.services.add.adding': 'Adding...',
+  'finish.services.selected': '{count} services selected',
+  'finish.services.selectedOne': '{count} service selected',
+  'finish.services.staffOnly': 'Staff bookings only',
+  'finish.services.onPage': 'Already on the page',
+  'finish.services.saving': 'Putting the services on the page...',
+  'finish.services.waiting': 'Setting the services up at {venueList}...',
+  'finish.services.failed': '{count} services could not be put on the page. You can try again from your Services page.',
+  'finish.calendars.heading': 'Who does what?',
+  'finish.calendars.help':
+    'Tick the calendars that offer each service. Guests only see a service once at least one calendar offers it. Every venue can change its own calendars later under Calendar Availability.',
+  'finish.calendars.all': 'All calendars',
+  'finish.calendars.notReady':
+    '{venue} is still being set up. Its calendars can be chosen in a moment, or later from the Collective area.',
+  'finish.calendars.noCalendars': '{venue} has no active calendars yet.',
+  'finish.calendars.saving': 'Saving calendars...',
+  'finish.calendars.failed':
+    '{count} calendar choices could not be saved. You can try them again from the Collective area.',
+  'finish.done.title': '{collective} is live',
+  'finish.done.body': 'Guests who open any of your venues\u2019 booking pages now land on the {collective} page.',
+  'finish.done.notLive.title': '{collective} is almost ready',
+  'finish.done.notLive.body':
+    'Nothing can be booked until at least one calendar offers one service. You can finish this from the Collective area.',
+  'finish.done.copy': 'Copy address',
+  'finish.done.open': 'Open the page',
+  'finish.done.design': 'Design the page',
+  'finish.done.design.body': 'Colours, photos and the welcome text, under Settings, Booking Page.',
+  'finish.done.area': 'Manage the collective',
+  'finish.done.area.body': 'Services, venues and history, all in one place.',
+  'finish.done.close': 'Done',
+  'finish.cta.next': 'Continue',
+  'finish.cta.back': 'Back',
+  'finish.cta.save': 'Save and continue',
+  'finish.cta.later': 'Do this later',
+  'finish.row.cta': 'Continue setup',
+  'finish.row.notLive': 'Not live yet: choose the services and calendars for the page.',
+  'la.row.invitation.pendingLink': 'Review {host}\u2019s link request on this tab to answer this invitation.',
+
+  // The notices these flows send
+  'notify.linkWithCollective.subject': '{host} wants to link with you and start {collective}',
+  'notify.linkWithCollective.body':
+    '{host} has asked to link their ResNeo venue with yours, and to start {collective}: one booking page where clients book either venue as one business. You can accept both, accept the link only, adjust the permissions, or decline.',
+  'notify.linkWithCollective.cta': 'Review request',
+  'notify.acceptedWithCollective.subject': '{venue} accepted your link and joined {collective}',
+  'notify.acceptedWithCollective.body':
+    '{venue} accepted your link request and joined {collective}. Two short steps make the shared booking page live: choose the services, then the calendars. Open your dashboard and choose Continue setup.',
+  'notify.acceptedWithCollective.cta': 'Continue setup',
+  'notify.proposedClosed.declined.subject': '{venue} declined your link request',
+  'notify.proposedClosed.declined.body':
+    '{venue} declined your request to link, so the invitation to {collective} closed with it. {collective} was ended, and you can start again at any time.',
+  'notify.proposedClosed.declined.bodyKept':
+    '{venue} declined your request to link, so the invitation to {collective} closed with it. {collective} carries on with its other venues.',
+  'notify.proposedClosed.expired.subject': 'Your link request to {venue} expired',
+  'notify.proposedClosed.expired.body':
+    '{venue} did not answer your request to link within 30 days, so the invitation to {collective} closed with it. {collective} was ended, and you can start again at any time.',
+  'notify.proposedClosed.expired.bodyKept':
+    '{venue} did not answer your request to link within 30 days, so the invitation to {collective} closed with it. {collective} carries on with its other venues.',
 } as const;
 
 export type CollectiveCopyId = keyof typeof COLLECTIVE_COPY;

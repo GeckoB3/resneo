@@ -23,6 +23,8 @@ import { engineErrorResponse } from '@/lib/linked-accounts/replicas/host-route-h
 import { applyLinksInline } from '@/lib/linked-accounts/replicas/inline-apply';
 import { JOIN_CONSENT_VERSION } from '@/lib/linked-accounts/replicas/hosting-constants';
 import { findCollectiveLockForVenue } from '@/lib/linked-accounts/collective-venue-locks';
+import { findLiveLinkBetween } from '@/lib/linked-accounts/queries';
+import { linkRowGrantsFullBothWays } from '@/lib/linked-accounts/collectives';
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
 import { OTHER_MODEL_COLUMNS, otherBookingModelList } from '@/lib/linked-accounts/collective-other-models';
 
@@ -56,6 +58,12 @@ export interface JoinPreview {
   warnings: { no_stripe_paid_services: number; form_services: number; forms_off: boolean };
   /** The venue's classes, events or bookable rooms in words, which stay on its own page (D44), or null. */
   other_models: string | null;
+  /**
+   * The mesh is not there yet, but a pending link from the host grants full access both ways, and
+   * the venue is reviewing that link and this invitation together (plan L4). Accepting the link first
+   * makes the mesh; the engine checks it again when the join runs.
+   */
+  pending_link?: boolean;
 }
 
 type Row = Record<string, unknown>;
@@ -101,6 +109,7 @@ export async function loadJoinPreview(
   admin: SupabaseClient,
   collectiveId: string,
   venueId: string,
+  opts: { allowPendingLink?: boolean } = {},
 ): Promise<JoinPreview | null> {
   const { data: collective } = await admin
     .from('venue_collectives')
@@ -125,6 +134,16 @@ export async function loadJoinPreview(
   const host = (venues ?? []).find((v) => v.id === hostId) as Row | undefined;
   // The engine's blocker says only "exclusivity"; the venue reads which collective it is in.
   const other = blocker === 'exclusivity' ? await findCollectiveLockForVenue(admin, venueId, collectiveId) : null;
+  // Reviewing the link request and the invitation together: the pending link, once accepted, is the mesh.
+  let pendingLink = false;
+  let effectiveBlocker = (blocker as string | null) ?? null;
+  if (effectiveBlocker === 'mesh' && opts.allowPendingLink) {
+    const pending = await findLiveLinkBetween(admin, hostId, venueId);
+    if (pending && pending.status === 'pending' && linkRowGrantsFullBothWays(pending)) {
+      pendingLink = true;
+      effectiveBlocker = null;
+    }
+  }
   const me = (venues ?? []).find((v) => v.id === venueId) as Row | undefined;
   const masterIds = (items ?? []).map((i) => i.master_service_id as string).filter(Boolean);
 
@@ -207,7 +226,7 @@ export async function loadJoinPreview(
     consent_version: JOIN_CONSENT_VERSION,
     collective_name: (collective.name as string) ?? 'the collective',
     host_name: (host?.name as string) ?? 'The host',
-    blocked: joinBlockerWords((blocker as string | null) ?? null, {
+    blocked: joinBlockerWords(effectiveBlocker, {
       collective: (collective.name as string) ?? 'the collective',
       yourTimezone: (me?.timezone as string | null) ?? null,
       timezone: (host?.timezone as string | null) ?? null,
@@ -227,6 +246,7 @@ export async function loadJoinPreview(
       forms_off: !formsOn,
     },
     other_models: otherBookingModelList(me),
+    ...(pendingLink ? { pending_link: true } : {}),
   };
 }
 
@@ -256,6 +276,10 @@ export interface JoinContext {
 export async function runJoin(
   ctx: JoinContext,
   input: JoinChoices & { consent_version?: string },
+  opts: {
+    /** The caller sends the host one notice covering the link and the join (plan L5), so N3 is not sent here. */
+    skipHostNotice?: boolean;
+  } = {},
 ): Promise<NextResponse | null> {
   if (input.consent_version !== JOIN_CONSENT_VERSION) {
     return NextResponse.json(apiError(collectiveCopy('join.error.consent'), 'COLLECTIVE_CONSENT_REQUIRED'), {
@@ -302,21 +326,27 @@ export async function runJoin(
     budgetMs: 8_000,
   });
 
-  await sendJoinNotices(ctx, input);
+  await sendJoinNotices(ctx, input, opts);
   return null;
 }
 
 /** N3 to the host (email and bell) and the other members (bell); N28 to the host per "ask". */
-async function sendJoinNotices(ctx: JoinContext, input: JoinChoices): Promise<void> {
+async function sendJoinNotices(
+  ctx: JoinContext,
+  input: JoinChoices,
+  opts: { skipHostNotice?: boolean } = {},
+): Promise<void> {
   const subject = collectiveCopy('notify.joined.subject', { venue: ctx.venueName, collective: ctx.collectiveName });
   const body = collectiveCopy('notify.joined.body', { venue: ctx.venueName, collective: ctx.collectiveName });
-  await notifyVenue(
-    ctx.admin,
-    ctx.hostVenueId,
-    subject,
-    { heading: subject, paragraphs: [body] },
-    { type: 'collective_joined', category: 'collective', collectiveId: ctx.collectiveId, actorVenueId: ctx.venueId },
-  ).catch(() => undefined);
+  if (!opts.skipHostNotice) {
+    await notifyVenue(
+      ctx.admin,
+      ctx.hostVenueId,
+      subject,
+      { heading: subject, paragraphs: [body] },
+      { type: 'collective_joined', category: 'collective', collectiveId: ctx.collectiveId, actorVenueId: ctx.venueId },
+    ).catch(() => undefined);
+  }
 
   const { data: others } = await ctx.admin
     .from('venue_collective_members')

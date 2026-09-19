@@ -9,7 +9,7 @@ import { loadJoinPreview } from '@/lib/linked-accounts/replicas/join';
  *
  * Only a venue with an open invitation to this collective may read it.
  */
-export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const resolved = await resolveLinkAdmin();
   if (!resolved.ok) return resolved.response;
   const { ctx } = resolved;
@@ -26,7 +26,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: 'There is no open invitation for your venue.' }, { status: 404 });
   }
 
-  const preview = await loadJoinPreview(ctx.admin, id, ctx.venueId);
+  // Reviewing the link request and this invitation together (plan L4): a pending full-access link
+  // from the host stands in for the mesh, because accepting it comes first.
+  const preview = await loadJoinPreview(ctx.admin, id, ctx.venueId, {
+    allowPendingLink: new URL(request.url).searchParams.get('with_pending_link') === '1',
+  });
   if (!preview) {
     return NextResponse.json({ error: 'This collective does not use shared services yet.' }, { status: 409 });
   }

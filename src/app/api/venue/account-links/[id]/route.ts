@@ -14,13 +14,20 @@ import {
 import type { AccountLinkRow, LinkGrant, PendingChange } from '@/lib/linked-accounts/types';
 import {
   notifyLinkAccepted,
+  notifyLinkAcceptedWithCollective,
   notifyLinkRejected,
   notifyLinkUnlinked,
   notifyPermissionChangeAccepted,
   notifyPermissionChangeDeclined,
   notifyPermissionChangeProposed,
+  notifyProposedCollectiveClosed,
 } from '@/lib/linked-accounts/notifications';
 import { reconcileCollectivesAfterLinkChange } from '@/lib/linked-accounts/collectives';
+import { invalidateCollectiveCatalogMemo } from '@/lib/linked-accounts/collective-venue';
+import { runJoin } from '@/lib/linked-accounts/replicas/join';
+import { closeInvitationForLink, loadInvitationForLink } from '@/lib/linked-accounts/proposed-collectives';
+import { isFullAccessBothWays } from '@/lib/linked-accounts/link-levels';
+import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 
 interface LinkContextResult {
   link: AccountLinkRow;
@@ -72,6 +79,23 @@ function callerGrantsToColumns(
     lowGrants: iAmLow ? pair.mine : pair.theirs,
     highGrants: iAmLow ? pair.theirs : pair.mine,
   });
+}
+
+/** The grant one side of the link authors, as stored. */
+function sideGrant(link: AccountLinkRow, side: 'low' | 'high'): LinkGrant {
+  return side === 'low'
+    ? {
+        calendar: link.low_grants_calendar,
+        pii: link.low_grants_pii,
+        act: link.low_grants_act,
+        calendarIds: normaliseCalendarIds(link.low_grants_calendar_ids),
+      }
+    : {
+        calendar: link.high_grants_calendar,
+        pii: link.high_grants_pii,
+        act: link.high_grants_act,
+        calendarIds: normaliseCalendarIds(link.high_grants_calendar_ids),
+      };
 }
 
 async function singleLinkView(
@@ -142,7 +166,27 @@ export async function PATCH(
             responded_by_user_id: ctx.userId,
           })
           .eq('id', id);
-        await notifyLinkRejected(ctx.admin, otherVenueId, ctx.venue.name);
+        // The collective invitation that rode on this request closes with it (plan L7); the
+        // requester hears about both in one notice.
+        const closed = await closeInvitationForLink(ctx.admin, {
+          hostVenueId: otherVenueId,
+          inviteeVenueId: ctx.venueId,
+          reason: 'declined',
+          actorVenueId: ctx.venueId,
+          actorUserId: ctx.userId,
+        });
+        if (closed.closed && closed.collectiveName) {
+          await notifyProposedCollectiveClosed(
+            ctx.admin,
+            otherVenueId,
+            ctx.venue.name,
+            closed.collectiveName,
+            'declined',
+            closed.dissolved,
+          );
+        } else {
+          await notifyLinkRejected(ctx.admin, otherVenueId, ctx.venue.name);
+        }
         return NextResponse.json({ link: await singleLinkView(ctx.admin, ctx.venueId, id) });
       }
 
@@ -159,6 +203,38 @@ export async function PATCH(
           },
           { status: 403 },
         );
+      }
+
+      // Also join the collective the requester proposed (plan L4, L5). The invitation must be the
+      // requester's, and the link as it will stand after this accept must grant full access both
+      // ways, or the join cannot run; that is refused here, before anything is written, so the venue
+      // can accept the link only instead (L6).
+      const wantsCollective = parsed.data.collective ?? null;
+      const invitation = wantsCollective
+        ? await loadInvitationForLink(ctx.admin, { hostVenueId: otherVenueId, inviteeVenueId: ctx.venueId })
+        : null;
+      if (wantsCollective) {
+        if (!invitation || invitation.id !== wantsCollective.collective_id) {
+          return NextResponse.json(
+            { error: 'There is no open invitation to that collective from this venue.', code: 'COLLECTIVE_INVITATION_NOT_FOUND' },
+            { status: 404 },
+          );
+        }
+        const iAmLowSide = link.venue_low_id === ctx.venueId;
+        const myFinal =
+          action === 'accept_with_changes' && parsed.data.grants
+            ? normaliseGrant(parsed.data.grants.mine)
+            : sideGrant(link, iAmLowSide ? 'low' : 'high');
+        const requesterOffered = sideGrant(link, iAmLowSide ? 'high' : 'low');
+        if (!isFullAccessBothWays(myFinal, requesterOffered)) {
+          return NextResponse.json(
+            {
+              error: collectiveCopy('respond.collective.needsFull', { collective: invitation.name }),
+              code: 'COLLECTIVE_LINK_NOT_FULL',
+            },
+            { status: 400 },
+          );
+        }
       }
 
       let updateColumns: Record<string, unknown> = {};
@@ -323,14 +399,54 @@ export async function PATCH(
       const acceptedBullets = bulletsAreDiff
         ? diffBullets
         : describeGrant(requesterGrant).map((s) => `Your venue can ${s}`);
-      await notifyLinkAccepted(
-        ctx.admin,
-        otherVenueId,
-        ctx.venue.name,
-        withChanges,
-        acceptedBullets,
-        bulletsAreDiff,
-      );
+
+      // The link is accepted, so the mesh holds: now the join (L5). A refusal leaves the link
+      // accepted and the invitation open, and the venue reads why.
+      let collectiveOutcome: { id: string; name: string; joined: boolean; error?: string } | null = null;
+      if (wantsCollective && invitation) {
+        const refused = await runJoin(
+          {
+            admin: ctx.admin,
+            collectiveId: invitation.id,
+            collectiveName: invitation.name,
+            hostVenueId: otherVenueId,
+            memberId: invitation.memberId,
+            venueId: ctx.venueId,
+            venueName: ctx.venue.name,
+            userId: ctx.userId,
+          },
+          {
+            consent_version: wantsCollective.consent_version,
+            same_name_choices: wantsCollective.same_name_choices,
+            own_service_choices: wantsCollective.own_service_choices,
+            form_choices: wantsCollective.form_choices,
+          },
+          { skipHostNotice: true },
+        );
+        if (refused) {
+          const body = (await refused.json().catch(() => ({}))) as { error?: string };
+          collectiveOutcome = { id: invitation.id, name: invitation.name, joined: false, error: body.error ?? 'Could not join.' };
+        } else {
+          invalidateCollectiveCatalogMemo(invitation.id);
+          collectiveOutcome = { id: invitation.id, name: invitation.name, joined: true };
+        }
+      }
+
+      if (collectiveOutcome?.joined) {
+        await notifyLinkAcceptedWithCollective(ctx.admin, otherVenueId, ctx.venue.name, {
+          id: collectiveOutcome.id,
+          name: collectiveOutcome.name,
+        });
+      } else {
+        await notifyLinkAccepted(
+          ctx.admin,
+          otherVenueId,
+          ctx.venue.name,
+          withChanges,
+          acceptedBullets,
+          bulletsAreDiff,
+        );
+      }
       // C7 — the accepter also asked the requester to expose more than they
       // offered. That is now a pending change rather than a fait accompli, so
       // the requester has to be told it is waiting on them; otherwise it sits
@@ -343,7 +459,10 @@ export async function PATCH(
           deferredBullets,
         );
       }
-      return NextResponse.json({ link: await singleLinkView(ctx.admin, ctx.venueId, id) });
+      return NextResponse.json({
+        link: await singleLinkView(ctx.admin, ctx.venueId, id),
+        collective: collectiveOutcome,
+      });
     }
 
     // ---- Cancel a pending request I sent --------------------------------
@@ -364,6 +483,14 @@ export async function PATCH(
         .from('account_links')
         .update({ status: 'revoked', terminated_at: new Date().toISOString() })
         .eq('id', id);
+      // The invitation that rode on the request is withdrawn with it (plan L7).
+      await closeInvitationForLink(ctx.admin, {
+        hostVenueId: ctx.venueId,
+        inviteeVenueId: otherVenueId,
+        reason: 'cancelled',
+        actorVenueId: ctx.venueId,
+        actorUserId: ctx.userId,
+      });
       return NextResponse.json({ link: await singleLinkView(ctx.admin, ctx.venueId, id) });
     }
 

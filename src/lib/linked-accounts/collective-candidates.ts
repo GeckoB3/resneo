@@ -10,11 +10,9 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { loadLinkViewsForVenue } from '@/lib/linked-accounts/queries';
-import { evaluateLinkEligibility } from '@/lib/linked-accounts/eligibility';
 import { findCollectiveLockForVenue } from '@/lib/linked-accounts/collective-venue-locks';
-import { normalCurrency } from '@/lib/linked-accounts/collective-currency';
-import { resolveActiveBookingModels } from '@/lib/booking/active-models';
 import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
+import { STANDING_VENUE_COLUMNS, collectiveStandingFromRows } from '@/lib/linked-accounts/collective-standing';
 
 export type CandidateStanding = 'ok' | 'no_payments' | 'blocked' | 'permissions';
 
@@ -33,9 +31,6 @@ export interface CollectiveCandidate {
 
 type Row = Record<string, unknown>;
 
-const sameTimezone = (a: unknown, b: unknown) =>
-  ((a as string | null) ?? 'Europe/London') === ((b as string | null) ?? 'Europe/London');
-
 /** The host's own booking address, for the same table. */
 export async function hostVenueSlug(admin: SupabaseClient, hostVenueId: string): Promise<string | null> {
   const { data } = await admin.from('venues').select('slug').eq('id', hostVenueId).maybeSingle();
@@ -52,9 +47,7 @@ export async function loadCollectiveCandidates(
   const ids = [hostVenueId, ...links.map((l) => l.otherVenue.id)];
   const { data: venues } = await admin
     .from('venues')
-    .select(
-      'id, name, slug, timezone, currency, stripe_charges_enabled, pricing_tier, plan_status, booking_model, enabled_models, active_booking_models, subscription_current_period_end, billing_access_source',
-    )
+    .select(STANDING_VENUE_COLUMNS)
     .in('id', ids);
   const byId = new Map(((venues ?? []) as Row[]).map((v) => [v.id as string, v]));
   const host = byId.get(hostVenueId);
@@ -84,55 +77,9 @@ export async function loadCollectiveCandidates(
       out.push({ ...base, standing: 'permissions', reason: collectiveCopy('create.venues.blocked.permissions', { venue: name }) });
       continue;
     }
-    if (!venue) {
-      out.push({ ...base, standing: 'blocked', reason: collectiveCopy('create.venues.blocked.plan') });
-      continue;
-    }
-    if (await findCollectiveLockForVenue(admin, venueId)) {
-      out.push({ ...base, standing: 'blocked', reason: collectiveCopy('create.venues.blocked.otherCollective') });
-      continue;
-    }
-    if (!sameTimezone(venue.timezone, host?.timezone)) {
-      out.push({
-        ...base,
-        standing: 'blocked',
-        reason: collectiveCopy('create.venues.blocked.timezone', {
-          timezone: (venue.timezone as string | null) ?? 'Europe/London',
-          yourTimezone: (host?.timezone as string | null) ?? 'Europe/London',
-        }),
-      });
-      continue;
-    }
-    if (normalCurrency(venue.currency as string | null) !== normalCurrency(host?.currency as string | null)) {
-      const currency = normalCurrency(venue.currency as string | null);
-      const hostCurrency = normalCurrency(host?.currency as string | null);
-      out.push({
-        ...base,
-        standing: 'blocked',
-        reason: collectiveCopy('create.venues.blocked.currency', { currency, yourCurrency: hostCurrency }),
-        detail: collectiveCopy('bm.currency.blocked', { venue: name, currency, hostCurrency }),
-      });
-      continue;
-    }
-    if (!evaluateLinkEligibility(venue as never, now).canCreate) {
-      out.push({ ...base, standing: 'blocked', reason: collectiveCopy('create.venues.blocked.plan') });
-      continue;
-    }
-    const models = resolveActiveBookingModels({
-      pricingTier: venue.pricing_tier as string | null,
-      bookingModel: venue.booking_model as never,
-      enabledModels: venue.enabled_models,
-      activeBookingModels: venue.active_booking_models,
-    });
-    if (!models.includes('unified_scheduling' as never)) {
-      out.push({ ...base, standing: 'blocked', reason: collectiveCopy('bm.invite.noAppointments', { venue: name }) });
-      continue;
-    }
-    if (venue.stripe_charges_enabled !== true) {
-      out.push({ ...base, standing: 'no_payments', reason: collectiveCopy('create.venues.warn.noStripe', { venue: name }) });
-      continue;
-    }
-    out.push({ ...base, standing: 'ok', reason: null });
+    const inOtherCollective = venue ? Boolean(await findCollectiveLockForVenue(admin, venueId)) : false;
+    const standing = collectiveStandingFromRows(host, venue, { inOtherCollective, now });
+    out.push({ ...base, standing: standing.standing, reason: standing.reason, detail: standing.detail });
   }
   const rank: Record<CandidateStanding, number> = { ok: 0, no_payments: 1, blocked: 2, permissions: 3 };
   return out.sort((a, b) => rank[a.standing] - rank[b.standing] || a.venue_name.localeCompare(b.venue_name));

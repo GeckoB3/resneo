@@ -8,6 +8,8 @@ import { Modal, btnDanger, btnPrimary, btnSecondary } from './linked-accounts-ui
 import { CombinedPageManager } from './CombinedPageManager';
 import { JoinCollectiveDialog } from './collective/JoinCollectiveDialog';
 import { CreateCollectiveDialog } from './collective/CreateCollectiveDialog';
+import { CollectiveSetupWizard } from './setup/CollectiveSetupWizard';
+import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 import { EndedCollectivesList, LeaveCollectiveDialog, ReleaseReviewCard } from './collective/ReleaseReview';
 import type { ReleaseReview } from '@/lib/linked-accounts/replicas/release-review';
 import type { AccountLinkView } from '@/lib/linked-accounts/types';
@@ -32,11 +34,25 @@ interface ConfirmState {
 export function VenueCollectivesPanel({
   venueName,
   activeLinks,
+  pendingLinkByHost = {},
+  onReviewLink,
+  autoOpenSetupId = null,
+  onSetupHandled,
 }: {
   venueName: string;
   activeLinks: AccountLinkView[];
+  /** Pending link requests this venue has received, by the requesting venue's id (plan L4). */
+  pendingLinkByHost?: Record<string, string>;
+  /** Open the review of that link request, which also answers the invitation that rides on it. */
+  onReviewLink?: (linkId: string) => void;
+  /** `?setup={collectiveId}` from the dashboard banner: open the finish-setting-up wizard (plan L8). */
+  autoOpenSetupId?: string | null;
+  onSetupHandled?: () => void;
 }) {
   const [collectives, setCollectives] = useState<CollectiveView[]>([]);
+  // The host's finish-setting-up wizard, and which collectives the banner feed says still need it.
+  const [setupTarget, setSetupTarget] = useState<CollectiveView | null>(null);
+  const [setupNeeded, setSetupNeeded] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -85,6 +101,29 @@ export function VenueCollectivesPanel({
   useEffect(() => {
     void load();
   }, [load]);
+
+  const loadSetupNeeds = useCallback(async () => {
+    try {
+      const res = await fetch('/api/venue/account-links/incoming');
+      if (!res.ok) return;
+      const json = (await res.json()) as { collectiveSetup?: { collectiveId: string }[] };
+      setSetupNeeded(new Set((json.collectiveSetup ?? []).map((c) => c.collectiveId)));
+    } catch {
+      /* the row simply does not offer the shortcut */
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSetupNeeds();
+  }, [loadSetupNeeds]);
+
+  useEffect(() => {
+    if (!autoOpenSetupId || loading) return;
+    const match = collectives.find((c) => c.id === autoOpenSetupId && c.isHost && c.status !== 'dissolved');
+    if (match) setSetupTarget(match);
+    onSetupHandled?.();
+  }, [autoOpenSetupId, collectives, loading, onSetupHandled]);
+
 
   
 
@@ -206,6 +245,13 @@ export function VenueCollectivesPanel({
                 setManageTarget(c);
               }}
               onConfirm={setConfirm}
+              pendingLinkId={pendingLinkByHost[c.hostVenueId] ?? null}
+              onReviewLink={onReviewLink}
+              setupNeeded={setupNeeded.has(c.id)}
+              onSetup={() => {
+                setError(null);
+                setSetupTarget(c);
+              }}
             />
           ))
         )}
@@ -244,6 +290,22 @@ export function VenueCollectivesPanel({
             }
             // A dissolve or address-strategy change alters the sidebar's combined-page link.
             refreshLayout();
+          }}
+        />
+      ) : null}
+
+      {setupTarget ? (
+        <CollectiveSetupWizard
+          collectiveId={setupTarget.id}
+          venueName={venueName}
+          onClose={() => {
+            setSetupTarget(null);
+            void load();
+            void loadSetupNeeds();
+            refreshLayout();
+          }}
+          onChanged={() => {
+            void loadSetupNeeds();
           }}
         />
       ) : null}
@@ -294,6 +356,10 @@ function CollectiveRow({
   onLeave,
   onManage,
   onConfirm,
+  pendingLinkId,
+  onReviewLink,
+  setupNeeded,
+  onSetup,
 }: {
   collective: CollectiveView;
   busy: boolean;
@@ -302,9 +368,16 @@ function CollectiveRow({
   onLeave: () => void;
   onManage: () => void;
   onConfirm: (state: ConfirmState) => void;
+  /** The host's link request this venue has not answered yet, which the invitation rides on. */
+  pendingLinkId: string | null;
+  onReviewLink?: (linkId: string) => void;
+  /** The page has two venues in and nothing bookable yet: offer the guided finish (plan L8). */
+  setupNeeded: boolean;
+  onSetup: () => void;
 }) {
   const dissolved = collective.status === 'dissolved';
   const invited = collective.myMembershipStatus === 'invited';
+  const hostName = collective.members.find((m) => m.venueId === collective.hostVenueId)?.venueName ?? 'the host';
   const isActiveMember = collective.myMembershipStatus === 'active';
   // The address customers actually use: a member venue's own page when the
   // collective adopted it (the manager shows the same), else the dedicated one.
@@ -374,7 +447,24 @@ function CollectiveRow({
 
         {!dissolved ? (
           <div className="flex min-w-0 flex-wrap items-start gap-2 sm:shrink-0">
-            {invited ? (
+            {invited && pendingLinkId ? (
+              // The invitation rides on a link request this venue has not answered: one review
+              // covers both (plan L4), so the row points there instead of offering a join the
+              // engine would refuse for want of the link.
+              <div className="flex flex-col items-end gap-1">
+                <button
+                  type="button"
+                  className={btnPrimary}
+                  disabled={busy}
+                  onClick={() => onReviewLink?.(pendingLinkId)}
+                >
+                  Review link request
+                </button>
+                <p className="max-w-xs text-right text-xs text-slate-600">
+                  {collectiveCopy('la.row.invitation.pendingLink', { host: hostName })}
+                </p>
+              </div>
+            ) : invited ? (
               <>
                 <button
                   type="button"
@@ -399,8 +489,13 @@ function CollectiveRow({
               // Only the host curates the combined page; members take part automatically
               // (their services use their own settings) and can View it or Leave below.
               <>
+                {collective.serviceModel === 'replicas' && setupNeeded ? (
+                  <button type="button" className={btnPrimary} disabled={busy} onClick={onSetup}>
+                    {collectiveCopy('finish.row.cta')}
+                  </button>
+                ) : null}
                 {collective.serviceModel === 'replicas' && !dissolved ? (
-                  <a href="/dashboard/collective" className={btnPrimary}>
+                  <a href="/dashboard/collective" className={setupNeeded ? btnSecondary : btnPrimary}>
                     Manage Collective
                   </a>
                 ) : null}

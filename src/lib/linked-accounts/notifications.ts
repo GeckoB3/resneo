@@ -5,6 +5,7 @@ import { sendEmail } from '@/lib/emails/send-email';
 import { renderLinkEmail, type LinkEmailParams } from '@/lib/emails/templates/linked-account-emails';
 import { loadActiveAdminStaff } from './queries';
 import { formatNotificationCopy } from './notification-center';
+import { collectiveCopy } from './collective-copy';
 import {
   classifyCrossVenueWrite,
   resolveLinkedNotificationPrefs,
@@ -631,4 +632,91 @@ export async function notifyCollectiveMemberLeft(
       ctaUrl: settingsUrl(),
     },
   );
+}
+
+// ---------------------------------------------------------------------------
+// One setup flow for linking and starting a collective
+// (Docs/link-and-collective-setup-wizard-plan.md, L4, L5 and L7)
+// ---------------------------------------------------------------------------
+
+function setupUrl(collectiveId: string): string {
+  return `${settingsUrl()}&setup=${encodeURIComponent(collectiveId)}`;
+}
+
+/** The one notice for a link request that carries a collective invitation (L4). */
+export async function notifyLinkRequestWithCollective(
+  admin: SupabaseClient,
+  recipientVenueId: string,
+  requesterVenueName: string,
+  collective: { id: string; name: string },
+  permissionBullets: string[],
+): Promise<void> {
+  const params = { host: requesterVenueName, collective: collective.name };
+  await notifyVenue(
+    admin,
+    recipientVenueId,
+    collectiveCopy('notify.linkWithCollective.subject', params),
+    {
+      heading: 'New link request and collective invitation',
+      paragraphs: [collectiveCopy('notify.linkWithCollective.body', params), collectiveCopy('notify.invite.body', { ...params, venue: 'your venue' })],
+      bullets: permissionBullets,
+      ctaLabel: collectiveCopy('notify.linkWithCollective.cta'),
+      ctaUrl: settingsUrl(),
+    },
+    { type: 'link_request_with_collective', category: 'lifecycle', collectiveId: collective.id },
+  );
+}
+
+/** The host's one notice when the other venue accepts the link and joins in the same step (L5). */
+export async function notifyLinkAcceptedWithCollective(
+  admin: SupabaseClient,
+  hostVenueId: string,
+  memberVenueName: string,
+  collective: { id: string; name: string },
+): Promise<void> {
+  const params = { venue: memberVenueName, collective: collective.name };
+  await notifyVenue(
+    admin,
+    hostVenueId,
+    collectiveCopy('notify.acceptedWithCollective.subject', params),
+    {
+      heading: 'Link accepted and collective joined',
+      paragraphs: [collectiveCopy('notify.acceptedWithCollective.body', params)],
+      ctaLabel: collectiveCopy('notify.acceptedWithCollective.cta'),
+      ctaUrl: setupUrl(collective.id),
+    },
+    { type: 'link_accepted', category: 'lifecycle', collectiveId: collective.id },
+  );
+}
+
+/** A declined or expired link request closed the invitation that rode on it, and perhaps the collective (L7). */
+export async function notifyProposedCollectiveClosed(
+  admin: SupabaseClient,
+  hostVenueId: string,
+  otherVenueName: string,
+  collectiveName: string,
+  how: 'declined' | 'expired',
+  dissolved: boolean,
+): Promise<void> {
+  const params = { venue: otherVenueName, collective: collectiveName };
+  const subject = collectiveCopy(
+    how === 'declined' ? 'notify.proposedClosed.declined.subject' : 'notify.proposedClosed.expired.subject',
+    params,
+  );
+  const body = collectiveCopy(
+    how === 'declined'
+      ? dissolved
+        ? 'notify.proposedClosed.declined.body'
+        : 'notify.proposedClosed.declined.bodyKept'
+      : dissolved
+        ? 'notify.proposedClosed.expired.body'
+        : 'notify.proposedClosed.expired.bodyKept',
+    params,
+  );
+  await notifyVenue(admin, hostVenueId, subject, {
+    heading: how === 'declined' ? 'Link request declined' : 'Link request expired',
+    paragraphs: [body],
+    ctaLabel: 'View linked accounts',
+    ctaUrl: settingsUrl(),
+  });
 }

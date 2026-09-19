@@ -2,6 +2,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getAcceptedLinkBetween, getStandingLinkBetween } from './queries';
+import type { AccountLinkRow } from './types';
 import { evaluateLinkEligibility } from './eligibility';
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
 import type { BookingPageConfig } from '@/lib/booking/booking-page-theme';
@@ -259,18 +260,31 @@ export async function hasFullMutualWriteLinks(
     if (otherId === venueId) continue;
     const link = await readLink(admin, venueId, otherId);
     if (!link) return false;
-    if (
-      link.low_grants_calendar !== 'full_details' ||
-      link.high_grants_calendar !== 'full_details' ||
-      link.low_grants_act !== 'create_edit_cancel' ||
-      link.high_grants_act !== 'create_edit_cancel' ||
-      link.low_grants_calendar_ids != null ||
-      link.high_grants_calendar_ids != null
-    ) {
-      return false;
-    }
+    if (!linkRowGrantsFullBothWays(link)) return false;
   }
   return true;
+}
+
+/** Full calendar detail and create, edit and cancel in both directions, with no calendar limits (D4). */
+export function linkRowGrantsFullBothWays(
+  link: Pick<
+    AccountLinkRow,
+    | 'low_grants_calendar'
+    | 'high_grants_calendar'
+    | 'low_grants_act'
+    | 'high_grants_act'
+    | 'low_grants_calendar_ids'
+    | 'high_grants_calendar_ids'
+  >,
+): boolean {
+  return (
+    link.low_grants_calendar === 'full_details' &&
+    link.high_grants_calendar === 'full_details' &&
+    link.low_grants_act === 'create_edit_cancel' &&
+    link.high_grants_act === 'create_edit_cancel' &&
+    link.low_grants_calendar_ids == null &&
+    link.high_grants_calendar_ids == null
+  );
 }
 
 /**

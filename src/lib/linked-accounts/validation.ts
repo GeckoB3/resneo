@@ -23,6 +23,37 @@ export const createLinkSchema = z.object({
   grants: grantPairSchema,
 });
 
+/**
+ * Accepting a link request that carries a collective invitation (Docs/link-and-collective-setup-wizard-plan.md,
+ * L4 and L5): the venue's answers and consent from the Join dialog, applied after the link is accepted.
+ */
+export const acceptCollectiveWithLinkSchema = z.object({
+  collective_id: z.string().uuid(),
+  consent_version: z.string().max(100),
+  same_name_choices: z
+    .array(
+      z.object({
+        item_id: z.string().uuid(),
+        choice: z.enum(['use_mine', 'add_new']),
+        my_service_id: z.string().uuid().optional(),
+        option_map: z
+          .array(z.object({ my_variant_id: z.string().uuid(), host_variant_id: z.string().uuid().nullable() }))
+          .optional(),
+      }),
+    )
+    .optional(),
+  own_service_choices: z.array(z.object({ service_id: z.string().uuid(), choice: z.enum(['ask', 'park']) })).optional(),
+  form_choices: z
+    .array(
+      z.object({
+        host_type_id: z.string().uuid(),
+        choice: z.enum(['use_existing', 'use_theirs']),
+        my_type_id: z.string().uuid().optional(),
+      }),
+    )
+    .optional(),
+});
+
 export const respondLinkSchema = z.object({
   action: z.enum([
     'accept',
@@ -35,6 +66,8 @@ export const respondLinkSchema = z.object({
     'cancel_change',
   ]),
   grants: grantPairSchema.optional(),
+  /** accept / accept_with_changes: also join the collective the requester proposed. */
+  collective: acceptCollectiveWithLinkSchema.optional(),
 });
 
 export const reduceLinkSchema = z.object({
@@ -112,6 +145,19 @@ export const collectiveBrandingSchema = z.object({
     .nullable()
     .optional(),
   description: z.string().max(600).nullable().optional(),
+});
+
+/** The one-call setup: a link request and, at full access both ways, a collective with it (plan L3). */
+export const linkSetupSchema = z.object({
+  targetSlug: z.string().min(1).max(120),
+  requestMessage: z.string().max(1000).optional(),
+  grants: grantPairSchema,
+  collective: z
+    .object({
+      name: z.string().min(2).max(120),
+      slug: collectiveSlugSchema,
+    })
+    .optional(),
 });
 
 export const createCollectiveSchema = z.object({

@@ -25,6 +25,10 @@ A collective sits on top of your account links. It does not change them, and lea
 
 ## Step 1: Create the collective (host)
 
+**Not linked with the other venue yet?** Start from **Link with a venue** in the **Active links** card instead. Choose **Work as one team**, then **Also start a collective**, name the collective and choose its address, and send. One request does both: when the other venue accepts, they join at the same time, and a banner on your dashboard walks you through step 3. See [Link with another venue](/help/getting-started/linked-venues).
+
+**Already fully linked?** Then:
+
 1. Open **Settings**, then **Linked Accounts**, and scroll to **Venue collectives**.
 2. Click **Create venue collective**. **Create a collective** opens in four steps.
 3. Read **What a collective is**, type a **Collective name**, and choose the address after \`/book/c/\`. ResNeo tells you whether it is free.
@@ -35,7 +39,9 @@ The page is not live yet. It goes live once an invited venue accepts and at leas
 
 ## Step 2: Join a collective (member)
 
-1. The invited venue's admins get an email and a bell notice. Open **Settings**, then **Linked Accounts**, and click **Accept invitation** on the collective's row.
+If the invitation came with a link request, you answer both together: click **Review request** on the dashboard banner or under **Pending requests**, and the review walks through the link and then the steps below. **Accept and join** does both; **Accept the link only** leaves the invitation on the collective's row for later.
+
+1. Otherwise, the invited venue's admins get an email and a bell notice. Open **Settings**, then **Linked Accounts**, and click **Accept invitation** on the collective's row.
 2. **Join** walks you through what joining means, your services, and any forms you already use:
    - If you already have a service with the same name as one of the host's, choose **Use my** service (it keeps its calendars and bookings, and takes the host's settings) or **Add** the host's **as a new service**.
    - Your other services are **parked** while you are part of the collective. Nobody can book a parked service, your team included, but bookings already made for it are not changed.
@@ -45,7 +51,9 @@ An invitation nobody answers closes after 30 days, with a reminder on day 7. The
 
 ## Step 3: Put services on the page (host)
 
-Open **Services**. Your services show a **Collective** badge when they are on the page.
+Once the other venue is in, a banner on your dashboard says **Continue setup**. It opens a short wizard that does everything below for you: tick the services that go on the page (add one there if you have none yet), then tick the calendars at each venue that offer them, and it shows you the page address and whether it is live. The same button sits on the collective's row under **Settings**, **Linked Accounts** until the page is live.
+
+If you prefer to do it by hand, or to change things later, open **Services**. Your services show a **Collective** badge when they are on the page.
 
 - To put a service on the page, switch on **On the** collective **page** on its card, or tick **Show on the** collective **page** when you add a new one. ResNeo sets it up at every venue with your settings.
 - When you save a service that is on the page, the change reaches every venue. The message after saving says whether every venue is up to date. If you change your mind within a minute, click **Put it back**.

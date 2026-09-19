@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Link with another venue",
   description: "Share calendars and bookings with another ResNeo venue, and see how links underpin a venue collective.",
   tags: ["linked accounts","linked venues","venue collective","combined booking page","chair rental","multi venue","sharing"],
-  verified: '2026-09-17',
+  verified: '2026-09-19',
   content: `# Link with another venue
 
 If you share a space with another business, rent a chair to someone self-employed, or run more than one venue, you can link your ResNeo accounts. Linking lets two venues see each other's calendars and, if you both agree, manage each other's bookings.
@@ -37,19 +37,27 @@ Start with a link. You do not need a collective to share a diary.
 ## Step 1: Send a link request
 
 1. Open **Settings**, then **Linked Accounts**.
-2. In the **Active links** card, click **Send link request**.
-3. Under **Find a venue**, type the other venue's name or paste their booking page address, then pick them from the list. Venues you can link with are marked **Available**. Ones marked **Unavailable** cannot link right now.
-4. Add a **Personal note (optional)** if you like.
-5. Set the permissions before you send. See step 2. This matters more than anything else on the page.
-6. Click **Send request**.
+2. In the **Active links** card, click **Link with a venue**. A short wizard opens and walks you through everything.
+3. Under **Which venue?**, type the other venue's name or paste their booking page address, then pick them from the list. Venues you can link with are marked **Available**. Ones marked **Unavailable** cannot link right now. Click **Continue**.
+4. Under **How closely will you work together?**, pick one of the three levels. See step 2. This matters more than anything else in the wizard.
+5. If you picked **Work as one team**, the wizard asks **Share one booking page?** Choose **Just link for now**, or **Also start a collective** to set up a shared booking page with the same request. Read [Run several venues as one collective](/help/getting-started/venue-collectives) first if you are unsure.
+6. On **Check and send**, read the summary, add a note for the other venue if you like, and click **Send request**.
 
-> **Warning:** the form arrives pre-filled with full access in both directions: full booking detail, client contact details, and create, edit and cancel. If you send it without changing anything, that is what you are offering and what you are asking for. Always review step 2 first.
+The other venue gets one email and one notice on their dashboard. Nothing changes until they accept, and the request stays under **Pending requests**, where you can cancel it.
+
+> **Warning:** the wizard starts on **Work as one team**, which is full access in both directions: full booking detail, client contact details, and create, edit and cancel. If you send it without changing the level, that is what you are offering and what you are asking for. Always read step 2 first.
 
 Do not know their exact name? Click **Get invite link** instead. **Invite a venue to link** gives you a link and a QR code to share. When an admin at the other venue opens it, it fills in a request back to you. It grants nothing on its own and expires in 30 days.
 
 ## Step 2: Choose what each venue can see and do
 
-Permissions are set separately for each direction, in two boxes:
+The wizard offers three levels, and each applies the same access both ways:
+
+- **See each other's diaries**: each venue sees the other's calendar in full, with no client names or contact details, and cannot change anything.
+- **Manage each other's bookings**: adds client contact details and the right to move or edit bookings that already exist.
+- **Work as one team**: adds making and cancelling bookings for each other. This is the only level that can run a shared booking page (a collective).
+
+Most venues only need the first. If you want different access in each direction, or to share only some of your calendars, click **Customise permissions**. The permissions are then set separately for each direction, in two boxes:
 
 - **What [their venue] can do with your data** is the access you are giving away. Read this one especially carefully.
 - **What you can do with [their venue]'s data** is what you are asking them to grant.
@@ -74,10 +82,12 @@ A link has to give something to somebody: if you set both directions to **No acc
 
 ## Step 3: Respond to a request sent to you
 
-1. Open **Settings**, then **Linked Accounts**.
-2. Under **Pending requests**, find the venue under **Received** and click **Review request**.
-3. Read the two lines saying what each venue would be able to do.
-4. Click **Reject**, or **Accept**, or **Accept with changes** to adjust the permissions first and then click **Save & accept**.
+1. A banner appears at the top of your dashboard, and the request is listed under **Pending requests** in **Settings**, then **Linked Accounts**. Click **Review request** on either.
+2. Read what the other venue is asking: two lines say what each venue would be able to do. Click **Adjust permissions** to change what you share before accepting.
+3. If the request also invites you to a collective, the next steps explain what joining means for your booking page and your services, and let you decide about each of your services. Read them carefully: they are the same steps as joining a collective on its own.
+4. On **Check and accept**, click **Accept** (or **Accept and join** for a collective), **Accept the link only** to leave the collective invitation for later, or **Decline**.
+
+Declining a request that came with a collective invitation closes that invitation too.
 
 > **Good to know:** a request nobody answers expires after 30 days. You can have 10 requests waiting at once, and there is a seven-day wait before you can ask the same venue again after a rejection.
 
@@ -127,7 +137,7 @@ Emails go to your venue's contact address and to active admins. The last one can
 
 ## Put linked venues on one booking page
 
-A **venue collective** puts two or more linked venues on one public booking page, with one set of services that the host venue manages. It needs a link that is fully open in **both** directions: full booking detail, create, edit and cancel, and no limit to particular calendars. Creating one, joining one, and running the page are covered in [Run several venues as one collective](/help/getting-started/venue-collectives).
+A **venue collective** puts two or more linked venues on one public booking page, with one set of services that the host venue manages. It needs a link that is fully open in **both** directions: full booking detail, create, edit and cancel, and no limit to particular calendars. The quickest way to start one with a venue you are not linked with yet is **Link with a venue**, choosing **Work as one team** and then **Also start a collective** (step 1). Creating one with a venue you are already linked with, joining one, and running the page are covered in [Run several venues as one collective](/help/getting-started/venue-collectives).
 
 > **Good to know:** a collective never changes your links. Leaving or ending one leaves every link, and the access it gives, exactly as it is.
 

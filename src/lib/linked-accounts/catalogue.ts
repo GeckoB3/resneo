@@ -236,13 +236,21 @@ export interface CombinedEligibilityResult {
 export async function checkCombinedEligibility(
   admin: SupabaseClient,
   memberVenueIds: string[],
-  options: { hostVenueId?: string } = {},
+  options: {
+    hostVenueId?: string;
+    /**
+     * Skip the accepted-link mesh. The one-call setup (`link-setup.ts`) admits an invitee on the
+     * pending link it has just created, which grants full access both ways; the engine checks the
+     * accepted link again when the venue joins (`collective_join_blocker`).
+     */
+    skipMesh?: boolean;
+  } = {},
 ): Promise<CombinedEligibilityResult> {
   const ids = [...new Set(memberVenueIds.filter(Boolean))];
   if (ids.length < 2) {
     return { ok: false, reason: 'A combined page needs at least two active members.', timezone: null };
   }
-  for (const venueId of ids) {
+  for (const venueId of options.skipMesh ? [] : ids) {
     const others = ids.filter((v) => v !== venueId);
     if (!(await hasFullMutualWriteLinks(admin, venueId, others))) {
       return {

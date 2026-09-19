@@ -605,6 +605,8 @@ section updated to match.)*
 
 ### 6.1 Request creation
 
+**Amended 2026-09-19 (`Docs/link-and-collective-setup-wizard-plan.md`).** The form is now the **Link with a venue** wizard (`LinkSetupWizard.tsx`): the venue; one of three plain levels of link, mutual by default (see each other's diaries; manage each other's bookings; work as one team, which is the §5.4 default), with the per-direction editor behind **Customise**; and, at full access both ways with a venue that can join, whether to start a collective with the request (§7.3). One call, `POST /api/venue/account-links/setup`, creates the pending link and the collective with its invitation, and sends one notice. The plain `POST /api/venue/account-links` remains for the app and keeps its checks in `link-request.ts`. The steps below still describe what is created.
+
 1. An Admin on Venue A opens `/dashboard/settings?tab=linked-accounts` → "Send link request".
 2. They identify Venue B. **Resolved decision (§12):** identify by Venue B's public
    booking-page **slug** (`venues.slug`, already unique and already the public identifier
@@ -626,6 +628,8 @@ System actions on submit (server route, e.g. `POST /api/venue/account-links`):
 - Surface a dashboard banner to Admins on Venue B (§8.3).
 
 ### 6.2 Request acceptance
+
+**Amended 2026-09-19.** The banner names the collective proposed with the request, and **Review request** opens `ReviewLinkRequestDialog`: the request (with **Adjust permissions**), then, when a collective rides on it and the link will grant full access both ways, the Join dialog's own steps (§7.3), then one check step with one consent line and three ways out: Decline, **Accept the link only**, **Accept and join**. The `PATCH` carries `collective: { collective_id, consent_version, ...choices }`; the route accepts the link first and then runs the engine's join, so a refused join leaves the link accepted and the invitation open, and the venue reads why. Lowering what the venue grants below full access withdraws the collective part (refused server-side with `COLLECTIVE_LINK_NOT_FULL`). A rejected, cancelled or expired request closes the invitation that rode on it and dissolves a collective left with the host alone (`below_two`); the requester hears about both in one notice.
 
 When an Admin on Venue B loads any dashboard page, a persistent banner shows:
 
@@ -848,6 +852,8 @@ and when the underlying link actually ends.
 - Conflict errors must not disclose *which* venue or collective holds a conflicting name.
 
 ### 7.3 Creation flow
+
+**Amended 2026-09-19.** A collective can now be created with the link request that admits its first member (`Docs/link-and-collective-setup-wizard-plan.md`, L3): `createCollectiveWithInvites` (factored from the create route) runs with the mesh gate skipped, because the pending link grants full access both ways and the engine checks the accepted link again at join. Everything else about the collective is as the Create dialog makes it: host active, invitee invited, page not live. Once the member joins, the host's dashboard banner **Continue setup** opens `CollectiveSetupWizard`: the host's services (pre-ticked when bookable online, one can be added inline), then the calendars at every venue, in two saves because a member's calendar cannot offer a service until its copy is applied. The Create dialog stays for venues that are already fully linked.
 
 1. An Admin with ≥ 1 full-mutual link opens Linked Accounts tab → "Create venue collective".
 2. Configure: `name`, `slug` (live availability check), `branding`, `service_grouping`.
@@ -1194,6 +1200,8 @@ framing of §3 and should be acknowledged: a linked venue *sees* (never edits) t
 venue's non-appointment calendar entities.
 
 ### 8.3 Incoming-request banner
+
+**Amended 2026-09-19.** `GET /api/venue/account-links/incoming` also carries `collective` on each request (the invitation that rides on it, derived from the `invited` member row hosted by the requester) and `collectiveSetup[]` for a host whose collective has two venues in and no service with a calendar. The banner says "{venue} wants to link with your venue and start {collective}" and, for the host, "{venue} joined {collective}. Two short steps make your shared booking page live" with **Continue setup**. Both link into the Linked accounts tab with `?review={linkId}` or `?setup={collectiveId}`, which open the right dialog.
 
 Persistent across dashboard pages until actioned, shown only to Admins:
 

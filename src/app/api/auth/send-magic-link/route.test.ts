@@ -27,11 +27,11 @@ function uniqueEmail(): string {
   return `rl-${seq}-${Date.now()}@example.test`;
 }
 
-function post(email: string, ip: string): NextRequest {
+function post(email: string, ip: string, extra: Record<string, unknown> = {}): NextRequest {
   return new NextRequest('https://resneo.test/api/auth/send-magic-link', {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-forwarded-for': ip },
-    body: JSON.stringify({ email, next: '/account/bookings' }),
+    body: JSON.stringify({ email, next: '/account/bookings', ...extra }),
   });
 }
 
@@ -179,6 +179,52 @@ describe('POST /api/auth/send-magic-link: the mobile sign-in contract', () => {
       expect(sentEmail().html).toContain(otp);
     },
   );
+
+  it.each([
+    ['a first-time address', 'signup'],
+    ['an address that has signed in before', 'magiclink'],
+  ])('writes the type GoTrue issued into the link, for %s', async (_label, issued) => {
+    /*
+      THE bug behind "this sign-in link was already used or has expired" for
+      every first-time customer. Asking GoTrue for a magiclink on an address
+      with no auth user creates the user and issues a SIGNUP token; a link that
+      says type=magiclink then fails verification with 403. This route wrote
+      `type=magiclink` unconditionally until 2026-09-19. The code in the same
+      email worked, because `type: 'email'` accepts either, which is why the
+      app was fine and the web was not.
+    */
+    adminReturning({ hashed_token: 'hashed-token-value', email_otp: '12345678', verification_type: issued });
+
+    const res = await POST(post(uniqueEmail(), uniqueIp()));
+
+    expect(await res.json()).toEqual({ ok: true });
+    expect(sentEmail().text).toContain(`/auth/confirm?token_hash=hashed-token-value&type=${issued}&`);
+    expect(sentEmail().text).not.toContain(`type=${issued === 'signup' ? 'magiclink' : 'signup'}`);
+  });
+
+  it('carries the app deep link when the app asks, and never for the web', async () => {
+    /*
+      With `redirect_to=resneo://callback`, /auth/confirm renders its hand-off
+      page instead of signing the customer into the WEBSITE, which spent the
+      one token the code in the same email needed. A web caller gets no
+      redirect_to, so its link completes on the web as before.
+    */
+    adminReturning({ hashed_token: 'hashed-token-value', email_otp: '12345678', verification_type: 'magiclink' });
+
+    await POST(post(uniqueEmail(), uniqueIp(), { client: 'app' }));
+    expect(sentEmail().text).toContain('&redirect_to=resneo%3A%2F%2Fcallback');
+    expect(sentEmail().text).toMatch(/sign in to the ResNeo app/i);
+    expect(sentEmail().html).toContain('Open the ResNeo app');
+
+    mockSendEmail.mockClear();
+    await POST(post(uniqueEmail(), uniqueIp()));
+    expect(sentEmail().text).not.toContain('redirect_to=');
+  });
+
+  it('refuses a client it does not know rather than guessing', async () => {
+    const res = await POST(post(uniqueEmail(), uniqueIp(), { client: 'desktop' }));
+    expect(res.status).toBe(400);
+  });
 
   it('answers a sent email with ok, never with fallback', async () => {
     // The app reads fallback as "not sent" and sends its own via Supabase. If a

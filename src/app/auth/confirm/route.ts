@@ -8,6 +8,7 @@ import { hasPlatformSuperuserJwtRole } from '@/lib/platform-auth';
 import { resolvePostLoginDestination, withSetPasswordGateIfNeeded } from '@/lib/post-login-destination';
 import { readSignupPendingFromMetadata } from '@/lib/signup-pending-selection';
 import { buildAppCallbackUrl, isAppDeepLink, renderAppHandoffPage } from '@/lib/auth/app-deep-link';
+import { renderConfirmInterstitial } from '@/lib/auth/confirm-interstitial';
 
 function getBaseUrl(requestUrl: string): string {
   if (process.env.NEXT_PUBLIC_BASE_URL) return normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
@@ -15,11 +16,32 @@ function getBaseUrl(requestUrl: string): string {
   return normalizePublicBaseUrl(new URL(requestUrl).origin);
 }
 
+const OTP_TYPES = new Set(['signup', 'invite', 'magiclink', 'recovery', 'email_change']);
+type OtpType = 'signup' | 'invite' | 'magiclink' | 'recovery' | 'email_change';
+
+function asOtpType(value: string | null): OtpType | null {
+  return value && OTP_TYPES.has(value) ? (value as OtpType) : null;
+}
+
+const NO_STORE_HTML = {
+  'Content-Type': 'text/html; charset=utf-8',
+  // The page holds a single-use credential: never cached, never sent onward.
+  'Cache-Control': 'no-store, max-age=0',
+  'Referrer-Policy': 'no-referrer',
+};
+
 /**
  * GET /auth/confirm - handle OTP / email links (token_hash + type).
  *
  * Supabase email templates may send:
  *   {{ .SiteURL }}/auth/confirm?token_hash=xxx&type=magiclink
+ *
+ * **The GET spends nothing.** A link with a token renders a small page that posts the
+ * token straight back here (see `renderConfirmInterstitial`), and the POST below is what
+ * verifies it. Link scanners fetch every URL in inbound mail before the recipient sees it,
+ * and until 2026-09-19 that fetch consumed the single-use token, so the customer's own click
+ * was told the link had already been used. An app link renders the hand-off page instead,
+ * for the same reason.
  *
  * Safe to use as an `emailRedirectTo` target regardless of which shape the template
  * currently produces: a PKCE `code` or an `error` is forwarded to `/auth/callback` (see below).
@@ -30,13 +52,7 @@ function getBaseUrl(requestUrl: string): string {
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const tokenHash = searchParams.get('token_hash');
-  const type = searchParams.get('type') as
-    | 'signup'
-    | 'invite'
-    | 'magiclink'
-    | 'recovery'
-    | 'email_change'
-    | null;
+  const type = asOtpType(searchParams.get('type'));
   const redirectToParam = searchParams.get('redirect_to');
 
   // The email templates pass the caller's redirect as `&redirect_to=`, because a template
@@ -84,17 +100,70 @@ export async function GET(request: Request) {
   if (tokenHash && type && type !== 'recovery' && isAppDeepLink(redirectToParam)) {
     const deepLink = buildAppCallbackUrl(tokenHash, type);
     if (deepLink) {
-      return new NextResponse(renderAppHandoffPage(deepLink, `${base}/login`), {
-        status: 200,
-        headers: {
-          'Content-Type': 'text/html; charset=utf-8',
-          // The URL holds a single-use credential: never cached, never sent onward.
-          'Cache-Control': 'no-store, max-age=0',
-          'Referrer-Policy': 'no-referrer',
-        },
-      });
+      return new NextResponse(renderAppHandoffPage(deepLink, `${base}/login`), { status: 200, headers: NO_STORE_HTML });
     }
   }
+
+  if (tokenHash && type) {
+    return new NextResponse(
+      renderConfirmInterstitial({
+        action: `${base}/auth/confirm`,
+        tokenHash,
+        type,
+        next: callerNext,
+        signInUrl: `${base}/login`,
+      }),
+      { status: 200, headers: NO_STORE_HTML },
+    );
+  }
+
+  return forwardOrFail(searchParams, base, fallbackNext);
+}
+
+/**
+ * No token_hash. That means the Supabase template is still sending `{{ .ConfirmationURL }}`,
+ * so GoTrue has redirected here with a PKCE `code` (or with `error`/`error_description` for a
+ * spent link). Neither can be handled server-side: the PKCE verifier lives in the browser, and
+ * `/auth/callback` already renders reason-specific copy for the error params. Hand off to it
+ * with the query intact rather than flattening everything to `exchange_failed`.
+ *
+ * This is what makes `/auth/confirm` safe as an `emailRedirectTo` under *either* template
+ * shape, so the template can be switched to `token_hash` independently of this deploy.
+ */
+function forwardOrFail(searchParams: URLSearchParams, base: string, fallbackNext: string): NextResponse {
+  const code = searchParams.get('code');
+  const authError = searchParams.get('error') ?? searchParams.get('error_description');
+  if (code || authError) {
+    const forwarded = new URLSearchParams(searchParams);
+    forwarded.set('next', fallbackNext);
+    return NextResponse.redirect(`${base}/auth/callback?${forwarded.toString()}`);
+  }
+  return NextResponse.redirect(`${base}${getAuthFailurePath(fallbackNext, 'exchange_failed')}`);
+}
+
+/**
+ * POST /auth/confirm - spend the token and establish the session.
+ *
+ * Reached from the interstitial the GET renders (a form post the page sends itself), or by
+ * anything else that already holds the token and wants the cookie session. The body is
+ * form-encoded or JSON. Redirects are 303 so the browser follows with a GET; the default
+ * 307 would replay the POST at the destination.
+ */
+export async function POST(request: Request) {
+  const body = await readBody(request);
+  const tokenHash = body.get('token_hash');
+  const type = asOtpType(body.get('type'));
+  const rawNext = body.get('next');
+  const callerNext = rawNext != null && rawNext !== '' ? resolveAuthNextPath(rawNext) : null;
+  const fallbackNext =
+    callerNext ??
+    (type === 'invite' || type === 'recovery' ? SET_PASSWORD_PATH : sanitizeAuthNextPath(null));
+  const base = getBaseUrl(request.url);
+  const redirect = (to: string) =>
+    NextResponse.redirect(to, {
+      status: 303,
+      headers: { 'Cache-Control': 'no-store, max-age=0', 'Referrer-Policy': 'no-referrer' },
+    });
 
   if (tokenHash && type) {
     const supabase = await createClient();
@@ -109,7 +178,7 @@ export async function GET(request: Request) {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user?.id) {
-        return NextResponse.redirect(`${base}${getAuthFailurePath(fallbackNext, 'exchange_failed')}`);
+        return redirect(`${base}${getAuthFailurePath(fallbackNext, 'exchange_failed')}`);
       }
 
       const meta = user.user_metadata as Record<string, unknown> | undefined;
@@ -147,27 +216,29 @@ export async function GET(request: Request) {
         destination = `${SET_PASSWORD_PATH}?next=${encodeURIComponent(destination)}`;
       }
 
-      return NextResponse.redirect(`${base}${destination}`);
+      return redirect(`${base}${destination}`);
     }
     console.error('Auth confirm failed:', error.message);
-    return NextResponse.redirect(`${base}${getAuthFailurePath(fallbackNext, mapAuthErrorMessageToDetail(error.message))}`);
+    return redirect(`${base}${getAuthFailurePath(fallbackNext, mapAuthErrorMessageToDetail(error.message))}`);
   }
 
-  // No token_hash. That means the Supabase template is still sending `{{ .ConfirmationURL }}`,
-  // so GoTrue has redirected here with a PKCE `code` (or with `error`/`error_description` for a
-  // spent link). Neither can be handled server-side: the PKCE verifier lives in the browser, and
-  // `/auth/callback` already renders reason-specific copy for the error params. Hand off to it
-  // with the query intact rather than flattening everything to `exchange_failed`.
-  //
-  // This is what makes `/auth/confirm` safe as an `emailRedirectTo` under *either* template
-  // shape, so the template can be switched to `token_hash` independently of this deploy.
-  const code = searchParams.get('code');
-  const authError = searchParams.get('error') ?? searchParams.get('error_description');
-  if (code || authError) {
-    const forwarded = new URLSearchParams(searchParams);
-    forwarded.set('next', fallbackNext);
-    return NextResponse.redirect(`${base}/auth/callback?${forwarded.toString()}`);
-  }
+  return redirect(`${base}${getAuthFailurePath(fallbackNext, 'exchange_failed')}`);
+}
 
-  return NextResponse.redirect(`${base}${getAuthFailurePath(fallbackNext, 'exchange_failed')}`);
+/** The POST body as a flat map: a form post from the interstitial, or JSON. */
+async function readBody(request: Request): Promise<URLSearchParams> {
+  const contentType = request.headers.get('content-type') ?? '';
+  const out = new URLSearchParams();
+  try {
+    if (contentType.includes('application/json')) {
+      const json = (await request.json()) as Record<string, unknown> | null;
+      for (const [k, v] of Object.entries(json ?? {})) if (typeof v === 'string') out.set(k, v);
+      return out;
+    }
+    const form = await request.formData();
+    for (const [k, v] of form.entries()) if (typeof v === 'string') out.set(k, v);
+  } catch {
+    // An unreadable body is an empty one: the caller lands on the sign-in page.
+  }
+  return out;
 }

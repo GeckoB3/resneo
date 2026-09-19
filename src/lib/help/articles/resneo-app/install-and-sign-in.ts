@@ -5,7 +5,7 @@ export const article: HelpArticle = {
   title: "Install the app and sign in",
   description: "Find the ResNeo app in the App Store or on Google Play, sign in with a password or a sign-in code, and choose whether you land on your venue or your own bookings.",
   tags: ["app","mobile","install","sign in","password","magic link","sign-in code","staff access"],
-  verified: '2026-09-12',
+  verified: '2026-09-19',
   content: `# Install the app and sign in
 
 The ResNeo app puts your diary in your pocket. It is the same venue as the web dashboard, so a booking taken on the app appears on the web straight away, and the other way round.
@@ -104,7 +104,7 @@ The fix is one of these:
 
 ## Common problems & fixes
 
-- **The email arrived but the code does not work.** Codes expire after a short time. Tap **Send another code** and use the newest email; an older code in your inbox will be refused.
+- **The email arrived but the code does not work.** Codes expire after a short time, and the button in the email is the same one-time key as the code, so if you tapped the button first the code has already been used. Tap **Send another code** and use the newest email; an older code in your inbox will be refused.
 - **Tapping the button in the email opened a website, not the app.** That is what the button does. Go back to the app, which is still waiting on the **Check your email** screen, and type the code from that email instead.
 - **You never receive the email.** Check the address for a typo, then check spam. Remember that a ResNeo account is created when a venue invites you or when you book with a venue, so if neither has happened there is no account yet.
 - **"Invalid login credentials" on the Password tab.** Either the password is wrong, or you have never set one. Use **Magic Link**, then set a password from **More → Account settings**.

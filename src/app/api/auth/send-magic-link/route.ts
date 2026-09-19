@@ -8,6 +8,8 @@ import { MAGIC_LINK_EXPIRY_HOURS } from '@/lib/auth/magic-link-lifetime';
 import { getStaffAuthBaseUrl } from '@/lib/staff-invite-redirect';
 import { buildMagicLinkConfirmNextQuery } from '@/lib/safe-auth-redirect';
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
+import { mintEntryLink } from '@/lib/auth/entry-link';
+import { APP_DEEP_LINK_PREFIX } from '@/lib/auth/app-deep-link';
 import { z } from 'zod';
 
 /**
@@ -39,6 +41,14 @@ const schema = z.object({
    * `/auth/callback?next=…` value. Must start with `/`. Defaults to `/auth/callback`.
    */
   next: z.string().startsWith('/').optional(),
+  /**
+   * Who is asking. The ResNeo app sends `app`, and its email then carries the
+   * app's deep link, so tapping the button on the phone opens the app instead
+   * of signing the customer into the website and spending the one token the
+   * code in the same email needed. Absent (older app builds, every web caller)
+   * means the web.
+   */
+  client: z.enum(['web', 'app']).optional(),
 });
 
 /**
@@ -67,6 +77,7 @@ export async function POST(request: NextRequest) {
     }
 
     const { email, next } = parsed.data;
+    const client = parsed.data.client ?? 'web';
     const nextPath = buildMagicLinkConfirmNextQuery(next);
     const normalisedEmail = email.trim().toLowerCase();
 
@@ -86,25 +97,24 @@ export async function POST(request: NextRequest) {
 
     const admin = getSupabaseAdminClient();
     const baseUrl = getStaffAuthBaseUrl(request);
-    const redirectTo = `${baseUrl}/auth/callback`;
 
-    const { data: genData, error: linkErr } = await admin.auth.admin.generateLink({
-      type: 'magiclink',
-      email: normalisedEmail,
-      options: {
-        redirectTo,
-      },
-    });
-
-    if (linkErr || !genData) {
-      console.error('[send-magic-link] generateLink:', linkErr?.message ?? 'no data');
+    /*
+      Through `mintEntryLink`, never `generateLink` directly, because the TYPE
+      in the link must be the one GoTrue issued. For an address with no auth
+      user yet (most first-time customers), asking for a magiclink creates the
+      user and issues a `signup` token; a link that says `type=magiclink` then
+      fails verification with "Email link is invalid or has expired", which the
+      sign-in page shows as "already used or has expired". This route hardcoded
+      `magiclink` until 2026-09-19 and every first-time customer hit exactly
+      that, while the code in the same email worked because `type: 'email'`
+      accepts either. `redirectTo` is not passed: the link is built here, not
+      from GoTrue's action_link.
+    */
+    const link = await mintEntryLink(admin, normalisedEmail);
+    if (!link) {
       return NextResponse.json({ fallback: true });
     }
-
-    const props = (genData as {
-      properties?: { hashed_token?: string; email_otp?: string };
-    }).properties;
-    const hashedToken = props?.hashed_token ?? '';
+    const hashedToken = link.tokenHash;
     /*
       P3-4i. `generateLink` returns a numeric OTP alongside the hash and this
       route used to discard it. A native client cannot follow a browser link
@@ -125,18 +135,21 @@ export async function POST(request: NextRequest) {
       and in anything that renders or accepts it. (`otp_expiry` carries the
       same hazard; see the note beside it in config.toml.)
     */
-    const emailOtp = props?.email_otp?.trim() || null;
+    const emailOtp = link.emailOtp;
 
-    if (!hashedToken) {
-      console.error('[send-magic-link] generateLink returned no hashed_token');
-      return NextResponse.json({ fallback: true });
-    }
-
+    /*
+      An app-requested link carries the app's deep link as `redirect_to`, which
+      `/auth/confirm` turns into its hand-off page WITHOUT spending the token,
+      so the app completes the sign-in itself (`app/(auth)/callback.tsx`).
+      Carried as a query value because an email cannot link to `resneo://`
+      directly; see lib/auth/app-deep-link.ts.
+    */
     const confirmUrl =
       `${baseUrl}/auth/confirm` +
       `?token_hash=${encodeURIComponent(hashedToken)}` +
-      `&type=magiclink` +
-      `&next=${encodeURIComponent(nextPath)}`;
+      `&type=${encodeURIComponent(link.verificationType)}` +
+      `&next=${encodeURIComponent(nextPath)}` +
+      (client === 'app' ? `&redirect_to=${encodeURIComponent(`${APP_DEEP_LINK_PREFIX}callback`)}` : '');
 
     /*
       P3-4e. This was three bare `<p>` tags and a naked anchor, built inline
@@ -148,6 +161,7 @@ export async function POST(request: NextRequest) {
       confirmUrl,
       expiryHours: MAGIC_LINK_EXPIRY_HOURS,
       emailOtp,
+      client,
     });
 
     try {

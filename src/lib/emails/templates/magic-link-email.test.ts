@@ -181,3 +181,41 @@ describe('P3-4e acceptance: it appears in the template gallery', () => {
     );
   });
 });
+
+describe('renderMagicLinkEmail: one key, and the app variant', () => {
+  const base = { confirmUrl: 'https://resneo.test/auth/confirm?token_hash=abc&type=magiclink', expiryHours: 24 };
+
+  it('says the button and the code are the same one-time key, when there is a code', () => {
+    /*
+      Spending either spends the other, and a newer link replaces an older one.
+      Nothing else in the flow can tell the customer that.
+    */
+    const { html, text } = renderMagicLinkEmail({ ...base, emailOtp: '12345678' });
+    for (const body of [html, text]) {
+      expect(body).toMatch(/same one-time key/i);
+      expect(body).toMatch(/asking for a new link replaces this one/i);
+    }
+  });
+
+  it('does not talk about a code it did not include', () => {
+    const { html, text } = renderMagicLinkEmail({ ...base, emailOtp: null });
+    for (const body of [html, text]) {
+      expect(body).not.toMatch(/same one-time key/i);
+      expect(body).toMatch(/asking for a new link replaces this one/i);
+    }
+  });
+
+  it('tells an app user the button opens the app and the code goes in the app', () => {
+    const { html, text } = renderMagicLinkEmail({ ...base, emailOtp: '12345678', client: 'app' });
+    expect(html).toContain('Open the ResNeo app');
+    expect(html).toMatch(/or enter this code in the app/i);
+    expect(text).toMatch(/open this link on your phone/i);
+    expect(html).not.toMatch(/Using the ResNeo app\?/);
+  });
+
+  it('keeps the web wording for a web request', () => {
+    const { html } = renderMagicLinkEmail({ ...base, emailOtp: '12345678' });
+    expect(html).toContain('Sign in to ResNeo');
+    expect(html).toMatch(/Using the ResNeo app\? Enter this code instead/);
+  });
+});

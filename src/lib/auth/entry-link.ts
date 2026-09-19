@@ -5,6 +5,12 @@ export type EntryLink = {
   tokenHash: string;
   /** The type GoTrue ACTUALLY issued, which is not always the one asked for. */
   verificationType: EmailOtpType;
+  /**
+   * The numeric code GoTrue issues alongside the hash, when it does. The same
+   * single-use token as the link: spending one spends the other. Its length is
+   * a per-project hosted setting, so it is carried as an opaque string.
+   */
+  emailOtp: string | null;
 };
 
 /**
@@ -22,8 +28,11 @@ export type EntryLink = {
  * round and was invisible to every test, because the fixture customer exists.
  *
  * Reading the type back rather than hard-coding it is the fix: GoTrue decides,
- * and this asks. Both entry routes go through here so they cannot drift, since
- * they had already been written twice with the same wrong constant.
+ * and this asks. Every route that mints a sign-in link goes through here so
+ * they cannot drift: the two entry routes had already been written with the
+ * same wrong constant, and `POST /api/auth/send-magic-link` carried it a third
+ * time until 2026-09-19, so every first-time customer's emailed link failed
+ * with "already used or has expired" while the code in the same email worked.
  */
 export async function mintEntryLink(
   admin: SupabaseClient,
@@ -31,14 +40,18 @@ export async function mintEntryLink(
 ): Promise<EntryLink | null> {
   const { data, error } = await admin.auth.admin.generateLink({ type: 'magiclink', email });
   const props = data?.properties as
-    | { hashed_token?: string; verification_type?: string; action_link?: string }
+    | { hashed_token?: string; verification_type?: string; action_link?: string; email_otp?: string }
     | undefined;
   const tokenHash = props?.hashed_token;
   if (error || !tokenHash) {
     console.error('[entry-link] generateLink failed:', error?.message);
     return null;
   }
-  return { tokenHash, verificationType: resolveVerificationType(props) };
+  return {
+    tokenHash,
+    verificationType: resolveVerificationType(props),
+    emailOtp: props?.email_otp?.trim() || null,
+  };
 }
 
 /**

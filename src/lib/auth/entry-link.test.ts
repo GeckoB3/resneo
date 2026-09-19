@@ -29,7 +29,7 @@ describe('mintEntryLink', () => {
       admin({ hashed_token: 'h1', verification_type: 'signup' }),
       'new@example.test',
     );
-    expect(got).toEqual({ tokenHash: 'h1', verificationType: 'signup' });
+    expect(got).toEqual({ tokenHash: 'h1', verificationType: 'signup', emailOtp: null });
   });
 
   it('reads the type off the action link when the field is absent', async () => {

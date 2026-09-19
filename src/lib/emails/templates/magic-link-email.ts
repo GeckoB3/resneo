@@ -55,6 +55,11 @@ export interface MagicLinkEmailParams {
    * and a missing code must not cost the recipient the link itself.
    */
   emailOtp?: string | null;
+  /**
+   * Who asked. For the ResNeo app the button opens the app (the link carries
+   * the app's deep link), so the copy says so. Defaults to the web.
+   */
+  client?: 'web' | 'app';
 }
 
 export function renderMagicLinkEmail(params: MagicLinkEmailParams): {
@@ -65,10 +70,25 @@ export function renderMagicLinkEmail(params: MagicLinkEmailParams): {
   const lifetime = hours === 1 ? '1 hour' : `${hours} hours`;
 
   const code = params.emailOtp?.trim();
+  const forApp = params.client === 'app';
+  const intro = forApp
+    ? 'Tap the button on your phone to open the ResNeo app and sign in, or type the code below into the app. You do not need a password.'
+    : 'Use the button below to sign in to your ResNeo account. You do not need a password.';
+  const codeIntro = forApp ? 'Or enter this code in the app:' : 'Using the ResNeo app? Enter this code instead:';
+  /*
+    The button and the code are ONE single-use key, not two. Spending either
+    spends the other: a customer who taps the link and then types the code, or
+    the other way round, is told the second one has "already been used". And a
+    newer link replaces an older one. The email has to say both, because
+    nothing else in the flow can.
+  */
+  const oneKey = code
+    ? ' The button and the code are the same one-time key, so use one or the other, not both.'
+    : '';
 
   const mainContent = [
-    '<p style="margin:0 0 16px">Use the button below to sign in to your ResNeo account. You do not need a password.</p>',
-    buildCtaButton('Sign in to ResNeo', params.confirmUrl),
+    `<p style="margin:0 0 16px">${escapeHtml(intro)}</p>`,
+    buildCtaButton(forApp ? 'Open the ResNeo app' : 'Sign in to ResNeo', params.confirmUrl),
     /*
       The code, for the ResNeo app and for anybody whose mail client breaks
       links. Below the button rather than above it, because the button is what
@@ -76,9 +96,9 @@ export function renderMagicLinkEmail(params: MagicLinkEmailParams): {
       extra work.
     */
     code
-      ? `<p style="margin:16px 0 0;font-size:14px;color:#334155">Using the ResNeo app? Enter this code instead: <strong style="font-size:18px;letter-spacing:2px">${escapeHtml(code)}</strong></p>`
+      ? `<p style="margin:16px 0 0;font-size:14px;color:#334155">${escapeHtml(codeIntro)} <strong style="font-size:18px;letter-spacing:2px">${escapeHtml(code)}</strong></p>`
       : '',
-    `<p style="margin:16px 0 0;font-size:13px;color:#64748b">This link works once and expires in ${escapeHtml(lifetime)}.</p>`,
+    `<p style="margin:16px 0 0;font-size:13px;color:#64748b">This link works once and expires in ${escapeHtml(lifetime)}.${escapeHtml(oneKey)} Asking for a new link replaces this one.</p>`,
     /*
       The line that makes this not look like phishing. Somebody who did not ask
       for this needs to be told, in the email itself, that ignoring it is the
@@ -98,11 +118,13 @@ export function renderMagicLinkEmail(params: MagicLinkEmailParams): {
   const text = [
     'Your ResNeo sign-in link',
     '',
-    'Use this link to sign in. You do not need a password:',
+    forApp
+      ? 'Open this link on your phone to sign in to the ResNeo app. You do not need a password:'
+      : 'Use this link to sign in. You do not need a password:',
     params.confirmUrl,
     '',
-    `This link works once and expires in ${lifetime}.`,
-    ...(code ? ['', `Using the ResNeo app? Enter this code instead: ${code}`] : []),
+    `This link works once and expires in ${lifetime}.${oneKey} Asking for a new link replaces this one.`,
+    ...(code ? ['', `${codeIntro} ${code}`] : []),
     '',
     'If you did not ask to sign in, you can ignore this email. Nothing will happen and no one can use this link but you.',
   ].join('\n');

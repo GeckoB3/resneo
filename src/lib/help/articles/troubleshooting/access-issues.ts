@@ -5,7 +5,7 @@ export const article: HelpArticle = {
   title: 'Login, staff access and permissions',
   description: 'Sign-in links that will not work, password resets, what a team member cannot reach, auto-logout, and billing locks.',
   tags: ['login', 'access', 'auth'],
-  verified: '2026-09-17',
+  verified: '2026-09-19',
   content: `
 # Login, staff access and permissions
 
@@ -15,7 +15,7 @@ What someone can reach comes down to three things: whether they are signed in, w
 
 Links in ResNeo emails are single use, and you will see one of these on the login page:
 
-- **This sign-in link was already used or has expired. Please request a new link.** Ask for a fresh one, or sign in with a password instead.
+- **This sign-in link was already used or has expired. Please request a new link.** Ask for a fresh one and open the newest email, or sign in with a password instead. The link and the code in one email are the same one-time key, and asking again replaces any earlier link.
 - **We could not complete sign-in from that link.** Open the newest link in the inbox, on the device you want to use, or sign in with a password.
 - **Your session has expired due to inactivity. Please sign in again.** The venue's auto-logout timer ran out. Just sign in again.
 

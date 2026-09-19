@@ -7,7 +7,7 @@ export const article: HelpArticle = {
   title: "Signing in to ResNeo",
   description: "The two ways into your account, creating a password from an invite or a reset link, and what to do when a link has expired.",
   tags: ["sign in","login","password","magic link","sign-in link","session","logout","invite"],
-  verified: '2026-09-12',
+  verified: '2026-09-19',
   content: `# Signing in to ResNeo
 
 Everything you do in ResNeo starts at the same sign-in page. You can use a password, or ask for a link by email and skip the password altogether. Both ways get you to the same place.
@@ -42,7 +42,7 @@ This is handy when you cannot remember your password, or you are on a phone and 
 
 Open the link on the device you want to be signed in on. It signs in whichever browser opens it, not the one you asked from, so a link opened on your phone signs your phone in.
 
-> **Good to know:** the email says "This link works once and expires in ${MAGIC_LINK_EXPIRY_HOURS} hours." If you have asked more than once, always open the newest email.
+> **Good to know:** the email says "This link works once and expires in ${MAGIC_LINK_EXPIRY_HOURS} hours." If you have asked more than once, always open the newest email: asking again replaces the earlier link. The button and the code in the same email are one key, so use one or the other, not both.
 
 To go back to the password form, click **Sign in with password instead**.
 

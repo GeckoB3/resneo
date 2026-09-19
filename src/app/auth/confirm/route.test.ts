@@ -39,7 +39,7 @@ vi.mock('@/lib/post-login-destination', () => ({
 }));
 
 import { createClient } from '@/lib/supabase/server';
-import { GET } from './route';
+import { GET, POST } from './route';
 
 /** Request origin. The redirect origin comes from NEXT_PUBLIC_BASE_URL, not from this. */
 const BASE = 'https://example.test';
@@ -56,6 +56,29 @@ async function locationOf(query: string): Promise<URL> {
   return new URL(location as string);
 }
 
+/** The form post the interstitial sends. */
+function postForm(fields: Record<string, string>, contentType = 'application/x-www-form-urlencoded'): Request {
+  const body =
+    contentType === 'application/json' ? JSON.stringify(fields) : new URLSearchParams(fields).toString();
+  return new Request(`${BASE}/auth/confirm`, { method: 'POST', headers: { 'content-type': contentType }, body });
+}
+
+/** The `Location` of the redirect the POST returns, which must be a 303. */
+async function postLocationOf(fields: Record<string, string>): Promise<URL> {
+  const res = await POST(postForm(fields));
+  expect(res.status, 'a POST must redirect with 303, or the browser replays the POST').toBe(303);
+  const location = res.headers.get('location');
+  expect(location, 'route did not redirect').toBeTruthy();
+  return new URL(location as string);
+}
+
+/** The hidden field values the interstitial carries, by name. */
+function hiddenFields(html: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const m of html.matchAll(/<input type="hidden" name="([^"]+)" value="([^"]*)">/g)) out[m[1]!] = m[2]!;
+  return out;
+}
+
 describe('GET /auth/confirm', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -70,7 +93,7 @@ describe('GET /auth/confirm', () => {
     // funnel. The resolver's role-based fall-throughs must decide instead.
     stub.verifyError = null;
     const { resolvePostLoginDestination } = await import('@/lib/post-login-destination');
-    await GET(get('?token_hash=abcdef123456&type=magiclink'));
+    await POST(postForm({ token_hash: 'abcdef123456', type: 'magiclink' }));
     expect(vi.mocked(resolvePostLoginDestination)).toHaveBeenCalledWith(
       expect.objectContaining({ rawNext: null }),
     );
@@ -79,7 +102,7 @@ describe('GET /auth/confirm', () => {
   it('still passes an explicit next through to destination resolution', async () => {
     stub.verifyError = null;
     const { resolvePostLoginDestination } = await import('@/lib/post-login-destination');
-    await GET(get('?token_hash=abcdef123456&type=magiclink&next=%2Faccount'));
+    await POST(postForm({ token_hash: 'abcdef123456', type: 'magiclink', next: '/account' }));
     expect(vi.mocked(resolvePostLoginDestination)).toHaveBeenCalledWith(
       expect.objectContaining({ rawNext: '/account' }),
     );
@@ -91,15 +114,66 @@ describe('GET /auth/confirm', () => {
     // does not honour a set-password `next`) nor the has_set_password gate (which never fires
     // for someone who already has a password) covers this, so the route forces it.
     stub.verifyError = null;
-    const url = await locationOf('?token_hash=abcdef123456&type=recovery');
+    const url = await postLocationOf({ token_hash: 'abcdef123456', type: 'recovery' });
     expect(url.pathname).toBe('/auth/set-password');
     expect(url.searchParams.get('next')).toBe('/dashboard');
   });
 
   it('leaves a verified magic link on its resolved destination', async () => {
     stub.verifyError = null;
-    const url = await locationOf('?token_hash=abcdef123456&type=magiclink');
+    const url = await postLocationOf({ token_hash: 'abcdef123456', type: 'magiclink' });
     expect(url.pathname).toBe('/dashboard');
+  });
+
+  it('renders the interstitial on GET without spending the token', async () => {
+    /*
+      Link scanners fetch every URL in inbound mail before the recipient sees
+      it. Verifying on that fetch consumed the single-use token, and the
+      customer's own click was then told the link had "already been used".
+    */
+    const res = await GET(get('?token_hash=abcdef123456&type=magiclink&next=%2Faccount'));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/html');
+    expect(res.headers.get('cache-control')).toContain('no-store');
+    expect(res.headers.get('referrer-policy')).toBe('no-referrer');
+    expect(vi.mocked(createClient)).not.toHaveBeenCalled();
+    const html = await res.text();
+    expect(html).toMatch(/method="post" action="https?:\/\/[^"]+\/auth\/confirm"/);
+    expect(hiddenFields(html)).toEqual({ token_hash: 'abcdef123456', type: 'magiclink', next: '/account' });
+  });
+
+  it('escapes what it puts in the form, so a crafted link cannot script the page', async () => {
+    const res = await GET(get(`?token_hash=${encodeURIComponent('"><script>x</script>')}&type=magiclink`));
+    const html = await res.text();
+    expect(html).not.toContain('<script>x</script>');
+    expect(hiddenFields(html).token_hash).toBe('&quot;&gt;&lt;script&gt;x&lt;/script&gt;');
+  });
+
+  it('treats a type it does not know as no token at all', async () => {
+    const url = await locationOf('?token_hash=abcdef123456&type=bogus');
+    expect(url.pathname).toBe('/login');
+    expect(vi.mocked(createClient)).not.toHaveBeenCalled();
+  });
+
+  it('sends a spent token from the POST to the sign-in page with the expired detail', async () => {
+    const url = await postLocationOf({ token_hash: 'spent', type: 'magiclink', next: '/account' });
+    expect(url.pathname).toBe('/login');
+    expect(url.searchParams.get('error')).toBe('auth_callback_error');
+    expect(url.searchParams.get('detail')).toBe('otp_expired');
+  });
+
+  it('accepts a JSON body on the POST', async () => {
+    stub.verifyError = null;
+    const res = await POST(postForm({ token_hash: 'abcdef123456', type: 'magiclink' }, 'application/json'));
+    expect(res.status).toBe(303);
+    expect(new URL(res.headers.get('location') as string).pathname).toBe('/dashboard');
+  });
+
+  it('fails closed on a POST with nothing usable, without touching Supabase', async () => {
+    const url = await postLocationOf({ type: 'magiclink' });
+    expect(url.pathname).toBe('/login');
+    expect(url.searchParams.get('detail')).toBe('exchange_failed');
+    expect(vi.mocked(createClient)).not.toHaveBeenCalled();
   });
 
   it('forwards a PKCE code to /auth/callback, preserving it and next', async () => {
@@ -157,9 +231,11 @@ describe('GET /auth/confirm', () => {
     // with their password unchanged. The web flow works for every app version, so
     // recovery is excluded from the hand-off even when redirect_to is the app.
     stub.verifyError = null;
-    const url = await locationOf(
-      '?token_hash=abcdef123456&type=recovery&redirect_to=resneo%3A%2F%2Fcallback',
-    );
+    const res = await GET(get('?token_hash=abcdef123456&type=recovery&redirect_to=resneo%3A%2F%2Fcallback'));
+    const html = await res.text();
+    expect(html).not.toContain('resneo://');
+    expect(hiddenFields(html).type).toBe('recovery');
+    const url = await postLocationOf({ token_hash: 'abcdef123456', type: 'recovery' });
     expect(url.pathname).toBe('/auth/set-password');
   });
 
@@ -169,7 +245,8 @@ describe('GET /auth/confirm', () => {
         get(`?token_hash=TH&type=magiclink&redirect_to=${encodeURIComponent(hostile)}`),
       );
       // Anything else falls through to normal handling, never to a hand-off page.
-      expect(res.headers.get('content-type') ?? '').not.toContain('text/html');
+      expect(await res.text()).not.toContain(hostile.replace(/&/g, '&amp;'));
+      expect(await GET(get(`?token_hash=TH&type=magiclink&redirect_to=${encodeURIComponent(hostile)}`)).then((r) => r.text())).not.toContain('Open the ResNeo app');
     }
   });
 

@@ -106,6 +106,18 @@ consume a cookie**, so there are two transports for the same mechanism.
 
 ### Two ways in, and both are the same underneath
 
+**0. Ask for the email with `client: 'app'`.** `POST /api/auth/send-magic-link`
+(alias `POST /api/v1/auth/magic-link/request`) takes `{ "email", "client": "app" }`.
+With `client: "app"` the emailed button carries `redirect_to=resneo://callback`,
+so `/auth/confirm` renders its hand-off page and the app completes the sign-in
+itself with the `token_hash` and `type` from the deep link; without it (older
+builds) the button signs the customer into the WEBSITE and spends the one
+token the code in the same email needs. The `type` in the link is the one
+GoTrue issued (`signup` for an address with no auth user yet), which the
+app's callback already passes through to `verifyOtp` unchanged. Since
+2026-09-19 a web link is verified on a POST from a small page, not on the GET,
+so a mail scanner fetching it no longer spends it; that is invisible to the app.
+
 **1. The typed code, with no ResNeo route at all.** The sign-in email now
 carries the `email_otp` that `generateLink` returns alongside the link; the
 route used to discard it. A client can take it straight to Supabase:

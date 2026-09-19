@@ -1646,6 +1646,8 @@ Production: read-only probes (P1 to P5, form collisions, Stripe readiness, forms
 ### Flag flip for new collectives (RT2-28)
 After the staging soak and 7 clean days on a migrated production collective: set the flag on staging, run LIFE-01 and a fixture create-to-dissolve, then production. Rollback: flag off.
 
+**Done 2026-09-19**, two days into the production soak. The owner set the flag on staging, created two new venues, linked them and made a collective from them (`Sept 19 and Sept 20`: both venues active, three services on the page, started on shared services), then set it on production the same day. LIFE-01 runs in CI (`src/app/api/venue/collectives/[id]/members/route.test.ts`). The dissolve step has not been run live on a collective that started on shared services.
+
 ### Pass C1: code removal
 Gates: no active collective outside replicas mode on either environment; legacy-reader sweep green; app contract green; legacy tests removed through INF-16. Staging 7 days, production 48 h. Rollback: previous build.
 

@@ -1,8 +1,14 @@
 # Venue collectives as one venue: forensic audit and implementation plan
 
-Status: PLAN, not implemented. Written 2026-09-13 against the `staging` branch at `c6020eb6`
+**Status (2026-09-19): built and in production.** The release reached production on 2026-09-17
+(`d0cdebcf`, PR #198). Staging's plus-1 collective and production's two collectives were migrated
+to shared services the same day, and since 2026-09-19 new collectives start on shared services in
+both environments (D37, the "Flag" pass in §8.2). What remains is W14: C1 (remove the older
+model's code), then C2 (the contract migration), after about a week of watching production.
+
+Status when written: PLAN, not implemented. Written 2026-09-13 against the `staging` branch at `c6020eb6`
 (the working tree also held unrelated uncommitted compliance and export fixes, since committed as
-`818ed5a` and `973bd3e`). Nothing in this document has been built. Evidence is cited as
+`818ed5a` and `973bd3e`). Nothing in this document had been built then. Evidence is cited as
 `path:line`; "staging" means the database in `.env.local` (project `zkppmyyvkjvbsvemakbb`), read
 with SELECT-only scripts. Production was not read.
 
@@ -1236,7 +1242,8 @@ excludes them, otherwise CI re-grants what the migration revokes;
 ### 6.7 Lifecycle
 
 - **Create.** Exclusivity, same currency and timezone; replicas mode for new collectives only once
-  a platform flag is switched on after the staging soak (RT2-28). The page stays unavailable until
+  a platform flag is switched on after the staging soak (RT2-28; switched on in both environments
+  on 2026-09-19, D37). The page stays unavailable until
   two venues are active and a service has a calendar.
 - **Invite.** Adds exclusivity, currency, timezone and the invitee's own plan eligibility (CB-31);
   warns when the invitee cannot take card payments or has forms switched off. The host may withdraw
@@ -2217,9 +2224,17 @@ and W2 below cover most of them.
 | A1 | Booking correctness, live: price snapshot and backfill, the resolver over today's two custom columns, base-price override removed, actor stamps, Stripe readiness and its backfill, `service_items.updated_at`, the assignment diff writes (W1's first part, W1a, and W2) and the column registry (W3's first part, W3a) | Expand |
 | A2 | Engine dark: engine schema and functions (W3), the five per-calendar columns after the grants hardening (W15, then W8), unique indexes once I7 = 0 | Expand |
 | B | Migrate existing collectives, per environment, after code A is live there and the Pass A go conditions in §7 hold | Data |
-| Flag | Switch new collectives to replicas after a 7-day clean soak | Configuration |
+| Flag | Switch new collectives to replicas after a 7-day clean soak. **Done 2026-09-19** in both environments (note below) | Configuration |
 | C1 | Remove legacy code paths (sync, name-matched copies, providers, category inheritance, base-price override) | Code |
 | C2 | Drop retired tables and columns, with `IF EXISTS` and a precondition block | Contract |
+
+**Progress (2026-09-19).** The release, with every owed migration, reached production on
+2026-09-17 (`d0cdebcf`), and staging's plus-1 and production's two collectives were migrated that
+day. The Flag pass followed on 2026-09-19: the owner switched the setting on staging, created two
+new venues there, linked them and made a collective from them (it started on shared services, with
+both venues active and three services on the page), then switched production the same day. That
+was two days into the production soak rather than after it, so the soak now gates W14 instead: C1
+and C2 wait for about a week of watching production.
 
 **Four ordering hazards inside these passes**, all found in the second pass:
 
@@ -2527,7 +2542,7 @@ Recorded for the record. Each has one sensible answer and no commercial or legal
 
 | id | Decision | Take this |
 |---|---|---|
-| D37 | Where the switch that puts new collectives into replicas mode lives. Flags today are per venue (`venues.feature_flags`, a closed six-key registry read per venue) and a collective spans venues, so there is no answer to "which venue's flag decides" | **A platform-level setting on the platform console, audited, deciding only what value new collectives are created with. `venue_collectives.service_model` stays the per-collective truth. Do not add a seventh key to `APPOINTMENTS_FEATURE_FLAG_KEYS`** |
+| D37 | Where the switch that puts new collectives into replicas mode lives. Flags today are per venue (`venues.feature_flags`, a closed six-key registry read per venue) and a collective spans venues, so there is no answer to "which venue's flag decides" | **A platform-level setting on the platform console, audited, deciding only what value new collectives are created with. `venue_collectives.service_model` stays the per-collective truth. Do not add a seventh key to `APPOINTMENTS_FEATURE_FLAG_KEYS`**. Built 2026-09-17 (migration `20270218230000`); switched to shared services in both environments on 2026-09-19 |
 | D40 | `capacity_per_session` on a collective service, where a member's room is smaller than the host's | **Venue-controlled, with the host's value as the starting point at join. A host cannot know another business's room size, and overbooking a member's room is a failure the guest experiences** |
 | D43 | The waitlist on the collective page, which cannot appear today because the synthetic venue publishes only two resolved flags | **Publish the full resolved flag set on the synthetic venue and give the waitlist route a collective branch, so a guest can wait for the collective the way they can wait for a venue. Without it the page is worse than the member's own page it replaces** |
 | D45 | Two venues sharing one physical room or piece of equipment | **Not supported, and said so plainly, until a cross-venue resource exists. Today each venue can put the same real room on a calendar and the platform will double-book it (SB-36).** Confirmed 2026-09-14 that resources are a live booking model, so this is a real scenario rather than a theoretical one, and it is most likely in exactly the collective shape D38 and D39 identify as commonest: venues under common ownership, sharing premises |

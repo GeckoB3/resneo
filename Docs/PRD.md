@@ -941,8 +941,8 @@ On the shared-services model:
 - **Migration.** Existing collectives stay on the older model (each
   venue's own service copies) until each is moved over by a script. At
   the move the host's values apply to every service on the page, and
-  every existing booking is left exactly as it was. New collectives are
-  still created on the older model until the switch is made.
+  every existing booking is left exactly as it was. Since the switch on
+  19 September 2026, new collectives start on shared services.
 
 Design: `Docs/collective-one-venue-plan.md` and
 `Docs/collective-one-venue-ux-spec.md`.

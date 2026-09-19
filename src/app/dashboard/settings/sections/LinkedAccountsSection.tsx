@@ -255,8 +255,12 @@ function LinkedAccountsSectionInner({ venueName }: { venueName: string }) {
     };
   }, []);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  /**
+   * `silent` refreshes the lists without the loading skeleton, which would unmount an open dialog
+   * (the setup wizard and the review dialog stay open on a receipt after their call succeeds).
+   */
+  const load = useCallback(async (opts: { silent?: boolean } = {}) => {
+    if (!opts.silent) setLoading(true);
     setError(null);
     try {
       const res = await fetch('/api/venue/account-links');
@@ -750,7 +754,7 @@ function LinkedAccountsSectionInner({ venueName }: { venueName: string }) {
             // The wizard stays open on its receipt step; the lists behind it refresh now. A
             // collective may now exist, which the server-rendered sidebar shows.
             setSendInitialSlug(undefined);
-            await load();
+            await load({ silent: true });
             router.refresh();
           }}
         />
@@ -777,7 +781,7 @@ function LinkedAccountsSectionInner({ venueName }: { venueName: string }) {
                 }),
               );
             }
-            await load();
+            await load({ silent: true });
             notifyLinkedAccountIncomingChanged();
             router.refresh();
           }}

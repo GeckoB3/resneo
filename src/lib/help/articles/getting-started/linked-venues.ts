@@ -45,6 +45,8 @@ Start with a link. You do not need a collective to share a diary.
 
 The other venue gets one email and one notice on their dashboard. Nothing changes until they accept, and the request stays under **Pending requests**, where you can cancel it.
 
+While you wait, a notice at the top of your dashboard says **Waiting for [their venue] to review your link request**. If you also started a collective, it says that **Continue setup** will appear once they accept. You do not need to check back: the notice changes by itself when they answer.
+
 > **Warning:** the wizard starts on **Work as one team**, which is full access in both directions: full booking detail, client contact details, and create, edit and cancel. If you send it without changing the level, that is what you are offering and what you are asking for. Always read step 2 first.
 
 Do not know their exact name? Click **Get invite link** instead. **Invite a venue to link** gives you a link and a QR code to share. When an admin at the other venue opens it, it fills in a request back to you. It grants nothing on its own and expires in 30 days.
@@ -88,6 +90,8 @@ A link has to give something to somebody: if you set both directions to **No acc
 4. On **Check and accept**, click **Accept** (or **Accept and join** for a collective), **Accept the link only** to leave the collective invitation for later, or **Decline**.
 
 Declining a request that came with a collective invitation closes that invitation too.
+
+After you accept, the dialog stays open on a short receipt saying what happens next. For a plain link, the link is active straight away and their columns appear in your **Appointment Calendar**. If you also joined a collective, nothing is needed from you yet: the other venue is now setting up the services and the shared booking page, and a notice on your dashboard says so until the page is live. Your own booking page carries on as it is until then.
 
 > **Good to know:** a request nobody answers expires after 30 days. You can have 10 requests waiting at once, and there is a seven-day wait before you can ask the same venue again after a rejection.
 

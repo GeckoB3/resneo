@@ -21,7 +21,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 
-SELECT plan(17);
+SELECT plan(19);
 
 INSERT INTO public.venues (id, name, slug, email, pricing_tier, plan_status, booking_model)
 VALUES
@@ -140,6 +140,16 @@ SELECT lives_ok(pg_temp.book('00000000-0000-0000-0000-0000009a0f02', '00000000-0
 UPDATE public.venue_collectives SET paused_at = now(), paused_reason = 'host_left' WHERE id = '00000000-0000-0000-0000-0000009a0c01';
 SELECT lives_ok(pg_temp.book('00000000-0000-0000-0000-0000009a0f01', '00000000-0000-0000-0000-0000009a0a01', '00000000-0000-0000-0000-0000009a0d01', '00000000-0000-0000-0000-0000009a0502'),
   'A paused collective parks nothing');
+
+-- A collective with one venue in it is not live (20270219130000): the host waits for the other venue
+-- to accept without its own services being parked. Parking starts once the second venue is active.
+UPDATE public.venue_collectives SET paused_at = NULL, paused_reason = NULL WHERE id = '00000000-0000-0000-0000-0000009a0c01';
+UPDATE public.venue_collective_members SET status = 'left' WHERE id = '00000000-0000-0000-0000-0000009a0e02';
+SELECT is(public.collective_bookable_service_ids('00000000-0000-0000-0000-0000009a0f01'), NULL::uuid[],
+  'Nothing is parked at the host while it is the only venue in the collective');
+SELECT is((public.collective_venue_live_state('00000000-0000-0000-0000-0000009a0f01')->>'live')::boolean, false,
+  'A collective with one venue in it is not live');
+UPDATE public.venue_collective_members SET status = 'active' WHERE id = '00000000-0000-0000-0000-0000009a0e02';
 
 UPDATE public.venue_collectives SET paused_at = NULL, paused_reason = NULL, service_model = 'legacy_copies' WHERE id = '00000000-0000-0000-0000-0000009a0c01';
 SELECT lives_ok(pg_temp.book('00000000-0000-0000-0000-0000009a0f01', '00000000-0000-0000-0000-0000009a0a01', '00000000-0000-0000-0000-0000009a0d01', '00000000-0000-0000-0000-0000009a0502'),

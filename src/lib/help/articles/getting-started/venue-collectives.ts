@@ -25,7 +25,7 @@ A collective sits on top of your account links. It does not change them, and lea
 
 ## Step 1: Create the collective (host)
 
-**Not linked with the other venue yet?** Start from **Link with a venue** in the **Active links** card instead. Choose **Work as one team**, then **Also start a collective**, name the collective and choose its address, and send. One request does both: when the other venue accepts, they join at the same time, and a banner on your dashboard walks you through step 3. See [Link with another venue](/help/getting-started/linked-venues).
+**Not linked with the other venue yet?** Start from **Link with a venue** in the **Active links** card instead. Choose **Work as one team**, then **Also start a collective**, name the collective and choose its address, and send. One request does both: while you wait, a notice on your dashboard says the request is with the other venue; when they accept, they join at the same time and the notice becomes **Continue setup**, which walks you through step 3. See [Link with another venue](/help/getting-started/linked-venues).
 
 **Already fully linked?** Then:
 
@@ -40,6 +40,8 @@ The page is not live yet. It goes live once an invited venue accepts and at leas
 ## Step 2: Join a collective (member)
 
 If the invitation came with a link request, you answer both together: click **Review request** on the dashboard banner or under **Pending requests**, and the review walks through the link and then the steps below. **Accept and join** does both; **Accept the link only** leaves the invitation on the collective's row for later.
+
+Once you have joined, a notice on your dashboard says **[the host] is setting up the services and the shared booking page, so nothing is needed from you yet**. It stays until the page is live, and the collective's row under **Venue collectives** says the same. Your own booking page carries on as it is in the meantime.
 
 1. Otherwise, the invited venue's admins get an email and a bell notice. Open **Settings**, then **Linked Accounts**, and click **Accept invitation** on the collective's row.
 2. **Join** walks you through what joining means, your services, and any forms you already use:

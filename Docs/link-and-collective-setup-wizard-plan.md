@@ -36,6 +36,7 @@ created, how the two consents are collected, and what each side is shown next.
 | L9 | Services are offered and calendars assigned in **two saves**, because a member's calendar cannot offer a service until its copy is applied (`COLLECTIVE_REPLICA_NOT_READY`). The wizard saves the offers, waits for the copies, then saves the calendars, and says which venue is still catching up. |
 | L10 | A host with no services yet adds one inside the wizard (name, length, price) rather than being sent away to the Services page. |
 | L11 | No migration. The invitation that belongs to a link request is the `venue_collective_members` row with `status = 'invited'` whose collective is hosted by the requesting venue. Both feeds derive it. |
+| L12 | Added 2026-09-19 after the first end-to-end run: **a collective with one venue in it is not live.** `collective_venue_live_state` (migration `20270219130000`) now needs two active memberships before `live` is true, so a host waiting for the other venue to accept keeps every service bookable on its own page. Parking starts the moment the second venue joins, which is when Continue setup appears. The public page and the own-page hand-over already needed two venues; this makes parking agree with them. The migration is owed to both environments. |
 
 ## 3. The three flows
 
@@ -102,6 +103,6 @@ Existing `create.*` and `join.*` strings are reused where the screens are the sa
 
 ## 8. What did not change
 
-The engine, the permission model, the Create and Join dialogs (still used), the Collective area, the
+The permission model, the engine apart from L12, the Create and Join dialogs (still used), the Collective area, the
 Services page. A venue that prefers the old two-step path can still send a link with any level and
 create the collective later from Create a collective.

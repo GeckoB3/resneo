@@ -16,7 +16,7 @@ Reports shows how busy you are, what you are taking, where your bookings come fr
 
 - Reports is **admin only**. Open **Settings**, then the **Reports** tab. There is no Reports row in the sidebar, and an old \`/dashboard/reports\` address sends you to the same tab.
 - Four tabs sit at the top right of the page: **Overview**, **New bookings**, **Revenue** and **Clients**. The last one is named after your word for a client.
-- Everything follows the date range you set, apart from **SMS segments this period** (which follows your billing period) and **Export your data** (which always covers your whole venue).
+- Everything follows the date range you set, apart from **SMS segments this period** (which follows your billing period) and **Export your data** (which has its own date choices, including **All time**).
 - Card names follow the wording your venue uses. This article says "appointment" and "client". If your profile uses "session" and "patient", you will see those words instead.
 - Cards appear only when there is something to show. **By booking type** needs activity in more than one booking type, **Event ticket sales by tier** needs ticket sales, and **Resource utilisation** needs resource bookings.
 
@@ -185,7 +185,7 @@ Emails are off by default and only send on the days you tick.
 
 ## Export your data
 
-**Export your data** sits at the bottom of **Overview** with two buttons: **Export all appointments** and **Export client list**. Both ignore the date range and cover your whole venue, and both are built at the moment you click, so nothing is out of date.
+**Export your data** sits at the bottom of **Overview**. Choose **Appointments**, **Clients** or **Services**, then the dates (**All time** for everything, or a month, a year or your own **From** and **To**), then **CSV**, **Excel spreadsheet** or **PDF**. The page counts what your choices cover before you download. Every file carries the full details, and it is built at the moment you click, so nothing is out of date. See [Exporting all your data](/help/settings/data-export) for what each file contains.
 
 Exports contain personal data. Store them securely, and delete local copies when you are finished.
 

@@ -16,7 +16,7 @@ Bring your client list and booking history across from your old system. ResNeo r
 
 - **Admins only.** Data import is hidden from team member logins. Ask an admin to run it rather than sending files round.
 - **Open the importer.** Click **Settings**, stay on the **Profile** tab, and scroll to the bottom. Under **Data import**, click **Open Data Import**. There is no Data import tab and no sidebar link.
-- **Back up what you already have.** Under **Settings → Reports**, use **Export all appointments** and **Export client list**, and keep both files.
+- **Back up what you already have.** Under **Settings → Reports**, use **Export your data** to download your appointments, your clients and your services (choose **All time** and **CSV** or **Excel spreadsheet**), and keep the files.
 - **Any spreadsheet will do.** Excel workbooks (.xlsx and .xls) and CSV exports both work, including files with title rows, several sheets, or unusual characters. ResNeo does not need to recognise the system you came from, because your columns are matched on the next step.
 
 What each file must contain:

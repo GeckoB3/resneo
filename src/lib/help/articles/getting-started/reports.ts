@@ -134,7 +134,7 @@ Emails are off by default and only send on the days you tick.
 
 ## Export your data
 
-At the bottom of **Overview**, **Export your data** offers **Export all appointments** and **Export client list**. These ignore the date range and cover your whole venue. Files are built there and then, so nothing is out of date.
+At the bottom of **Overview**, **Export your data** downloads your appointments, your clients or your services as a CSV, an Excel spreadsheet or a PDF, for **All time** or any dates you choose. It has its own date choices, separate from the date range above. Files are built there and then, so nothing is out of date.
 
 ## Common problems & fixes
 

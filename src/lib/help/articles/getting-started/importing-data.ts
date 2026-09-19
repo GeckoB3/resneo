@@ -13,7 +13,7 @@ Bring your client list and booking history across from your old system. ResNeo m
 
 ## Before you start
 
-1. Back up what you already have. Open **Settings**, then the **Reports** tab, and use **Export all appointments** and **Export client list**. Keep both files safe.
+1. Back up what you already have. Open **Settings**, then the **Reports** tab, and use **Export your data** to download your appointments and your clients (choose **All time** and **CSV**). Keep the files safe.
 2. Open the importer. Click **Settings**, stay on the **Profile** tab, and scroll to the bottom. Under **Data import**, click **Open Data Import**. There is no Data Import tab and no sidebar link.
 3. You need an admin login. **Data import** is hidden from staff logins.
 

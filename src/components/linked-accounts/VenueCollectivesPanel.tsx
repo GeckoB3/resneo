@@ -10,6 +10,7 @@ import { JoinCollectiveDialog } from './collective/JoinCollectiveDialog';
 import { CreateCollectiveDialog } from './collective/CreateCollectiveDialog';
 import { CollectiveSetupWizard } from './setup/CollectiveSetupWizard';
 import { collectiveCopy, formatVenueList } from '@/lib/linked-accounts/collective-copy';
+import { notifyLinkedAccountIncomingChanged } from '@/lib/linked-accounts/incoming-banner-events';
 import { EndedCollectivesList, LeaveCollectiveDialog, ReleaseReviewCard } from './collective/ReleaseReview';
 import type { ReleaseReview } from '@/lib/linked-accounts/replicas/release-review';
 import type { AccountLinkView } from '@/lib/linked-accounts/types';
@@ -312,10 +313,13 @@ export function VenueCollectivesPanel({
             setSetupTarget(null);
             void load();
             void loadSetupNeeds();
+            // The dashboard banner reads the same feed: tell it the setup need may have gone.
+            notifyLinkedAccountIncomingChanged();
             refreshLayout();
           }}
           onChanged={() => {
             void loadSetupNeeds();
+            notifyLinkedAccountIncomingChanged();
           }}
         />
       ) : null}

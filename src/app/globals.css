@@ -992,6 +992,10 @@ button, a, input, select, textarea {
 .home-warm h3 {
   font-weight: 800;
 }
+/* Body text that sits inside a heading, such as a concertina's summary line. */
+.home-warm .home-body {
+  font-family: var(--font-home-body), "Segoe UI", system-ui, sans-serif;
+}
 
 /* Ask ResNeo answers (src/components/assistant/AssistantMarkdown.tsx) */
 .assistant-prose p { margin: 0 0 0.6rem; }

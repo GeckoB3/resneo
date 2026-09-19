@@ -87,6 +87,11 @@ function buildFaqSections(): { heading: string; items: FaqItem[] }[] {
           answer:
             'On Appointments Plus and Pro, yes (within your plan limits). Each team member can have their own calendar with individual working hours, breaks, and services, plus a personal booking link to share with clients. Appointments Light is built for sole traders: one bookable calendar and one venue login. Upgrade to Plus or Pro when you need multiple staff with separate calendars.',
         },
+        {
+          question: 'Can several independents share one booking page?',
+          answer:
+            'Yes. If you work alongside other independents, like self-employed stylists in one salon or practitioners sharing a clinic, you can put everyone on one combined booking page, so your clients see one business. Each of you needs your own ResNeo account and plan. One of you then sends a link request to each of the others from Settings, then Linked Accounts, and they accept. Once everyone is linked, one of you creates the combined page (your dashboard calls it a venue collective) and invites the others. Each of you keeps your own clients, bookings and payments, and you can leave at any time.',
+        },
       ],
     },
     {

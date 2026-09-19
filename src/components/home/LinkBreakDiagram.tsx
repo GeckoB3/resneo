@@ -3,13 +3,15 @@
 import { useState } from 'react';
 
 /* ────────────────────────────────────────────────────────────────────────
-   Link & break diagram.
+   Combined booking page diagram.
 
-   The whole point of the feature is what does NOT change when you link or
-   unlink, so the diagram is built to make that visible: toggling only ever
-   redraws the top half (the shared public booking page) and the connector.
-   The two sets of books at the bottom are deliberately identical in both
-   states, so the eye sees that nothing moved.
+   The whole point of the feature is what does NOT change when you join or
+   leave a combined page, so the diagram is built to make that visible:
+   toggling only ever redraws the top half (the public booking page) and the
+   connector. The two sets of books at the bottom are deliberately identical
+   in both states, so the eye sees that nothing moved. They list clients,
+   bookings and payments only: on a combined page the host sets the prices,
+   so prices are not something each person keeps.
    ──────────────────────────────────────────────────────────────────────── */
 
 type Tone = 'brand' | 'accent';
@@ -136,12 +138,12 @@ export function LinkBreakDiagram() {
         </p>
         <div
           role="group"
-          aria-label="Booking page link state"
+          aria-label="One combined booking page, or a page each"
           className="inline-flex items-center rounded-full border border-slate-200 bg-white p-1 shadow-sm"
         >
           {[
-            { label: 'Linked', on: linked, next: true },
-            { label: 'Unlinked', on: !linked, next: false },
+            { label: 'One page', on: linked, next: true },
+            { label: 'Own pages', on: !linked, next: false },
           ].map((opt) => (
             <button
               key={opt.label}
@@ -167,13 +169,13 @@ export function LinkBreakDiagram() {
 
       <p className="sr-only" aria-live="polite">
         {linked
-          ? 'Linked. Sophie and Aaron share one public booking page. Their books stay separate.'
-          : 'Unlinked. Sophie and Aaron each have their own booking page again. Their books are unchanged.'}
+          ? 'One page. Sophie and Aaron share one combined booking page. Their clients, bookings and payments stay separate.'
+          : 'Own pages. Sophie and Aaron each have their own booking page again. Their clients, bookings and payments are unchanged.'}
       </p>
 
       {/* The point of the control, stated where the control is. */}
       <p className="mx-auto mt-5 max-w-lg text-center text-sm leading-relaxed text-slate-600">
-        Watch what does not move. Linking and unlinking only ever changes the booking page at the top.
+        Watch what does not move. Joining or leaving only ever changes the booking page at the top.
       </p>
 
       {/* ── Top half: the public booking page (this is all that changes) ──
@@ -193,7 +195,7 @@ export function LinkBreakDiagram() {
             <div className="p-5">
               <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-brand-700">
                 <ChainIcon className="h-3 w-3" />
-                One shared booking page
+                One combined booking page
               </span>
               {/* Not a heading: this is a label inside an illustrative mock. */}
               <p className="mt-3 text-lg font-bold tracking-tight text-slate-900">The Chair Co.</p>
@@ -333,14 +335,14 @@ export function LinkBreakDiagram() {
             {linked ? (
               <>
                 <ChainIcon className="h-4 w-4 shrink-0 text-accent-700" />
-                Linked to share one page
+                Sharing one booking page
               </>
             ) : (
               <>
-                {/* Not a danger colour: breaking the link is a safe, deliberate
-                    action the owner controls, not an error state. */}
+                {/* Not a danger colour: leaving is a safe, deliberate action
+                    the owner controls, not an error state. */}
                 <BrokenChainIcon className="h-4 w-4 shrink-0 text-slate-500" />
-                Unlinked in one click
+                Back to their own pages
               </>
             )}
           </span>
@@ -372,7 +374,7 @@ export function LinkBreakDiagram() {
             <dl className="mt-4 space-y-2.5">
               {[
                 { k: 'Clients', v: `${p.clients}, only theirs` },
-                { k: 'Calendar and prices', v: 'Set by them' },
+                { k: 'Bookings', v: 'In their own calendar' },
                 { k: 'Payments', v: 'Straight to their account' },
               ].map((row) => (
                 <div key={row.k} className="flex items-baseline justify-between gap-3 border-b border-dashed border-slate-100 pb-2 last:border-0 last:pb-0">
@@ -390,7 +392,7 @@ export function LinkBreakDiagram() {
       </div>
 
       <figcaption className="mx-auto mt-8 max-w-xl text-center text-sm leading-relaxed text-slate-600">
-        Every client, calendar, price and payment underneath stays exactly where it was. Illustrative example.
+        Every client, booking and payment underneath stays exactly where it was. Illustrative example.
       </figcaption>
     </figure>
   );

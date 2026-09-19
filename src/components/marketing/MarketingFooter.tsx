@@ -24,7 +24,7 @@ const SOLUTION_LINKS = [
 
 const PRODUCT_LINKS: { href: string; label: string; route?: boolean }[] = [
   { href: "/#features", label: "Features" },
-  { href: "/#link-break", label: "Link & break" },
+  { href: "/#link-break", label: "Combined booking page" },
   { href: "/#pricing", label: "Pricing" },
   { href: "/appointments-plan", label: "Appointments plan", route: true },
 ];

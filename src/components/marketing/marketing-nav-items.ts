@@ -28,7 +28,7 @@ export const MARKETING_SIGNUP_HREF = "/#pricing";
 
 /** Secondary destinations that only need to appear in the mobile panel. */
 export const MARKETING_NAV_SECONDARY: MarketingNavItem[] = [
-  { href: "/#link-break", label: "Link & break" },
+  { href: "/#link-break", label: "Combined booking page" },
   { href: "/about", label: "About", route: true },
   { href: "/login", label: "Log in", route: true },
 ];

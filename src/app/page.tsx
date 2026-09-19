@@ -96,8 +96,8 @@ export default function Home() {
             <img src="/Logo.png" alt="ResNeo" className="h-8 w-auto" />
           </Link>
           {/* Five links, with the gap tightened so the bar still fits at 768px.
-              Link & break, FAQ and About stay reachable from the mobile menu
-              and the footer. */}
+              Combined booking page, FAQ and About stay reachable from the
+              mobile menu and the footer. */}
           <div className="hidden items-center gap-0.5 rounded-full border border-[#E8E4DC] bg-white p-1 shadow-[0_6px_20px_rgba(0,59,111,0.06)] md:flex">
             <a href="#features" className="rounded-full px-3.5 py-2 text-sm font-bold text-slate-600 transition-colors hover:bg-brand-50 hover:text-brand-700">Features</a>
             <Link href="/solutions" className="rounded-full px-3.5 py-2 text-sm font-bold text-slate-600 transition-colors hover:bg-brand-50 hover:text-brand-700">Solutions</Link>
@@ -305,7 +305,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ── Link & break ────────────────────────────────────── */}
+      {/* ── Working together: the combined booking page ─────── */}
       <LinkBreakSection />
 
       {/* ── Getting started: three steps, then the video ────── */}
@@ -333,6 +333,21 @@ export default function Home() {
             </ol>
           </div>
 
+          {/* Several independents each sign up here first, then link: say so
+              where people look for setup steps. */}
+          <HomeReveal delay={120}>
+            <p className="mx-auto mt-14 max-w-2xl rounded-[22px] border border-[#EEE9E0] bg-white px-6 py-5 text-center text-sm leading-relaxed text-slate-600 shadow-[0_18px_40px_-24px_rgba(0,59,111,0.2)]">
+              <span className="font-bold text-slate-900">Several independents working together?</span> Each of
+              you follows these three steps to set up your own account. Then you link your accounts to share
+              one booking page.{" "}
+              <a
+                href="#link-setup"
+                className="font-semibold text-brand-600 underline decoration-brand-300 underline-offset-2 transition-colors hover:text-brand-700"
+              >
+                See how to link them
+              </a>
+            </p>
+          </HomeReveal>
         </div>
       </section>
 

@@ -202,7 +202,7 @@ const GROUPS: FeatureGroup[] = [
       "Reports on revenue, no-shows, deposits, team and services",
       "Export everything as CSV, whenever you like",
       "Smart import from your old system, with undo",
-      "Link calendars or share a booking page with other venues",
+      "Link with other independents to share calendars or one booking page",
       "iOS and Android apps for you and your clients",
       "Help centre, in-app support and a free onboarding walkthrough",
     ],

@@ -20,7 +20,7 @@ const DESKTOP_QUERY = '(min-width: 768px)';
 
 const ITEMS: { href: string; label: string; internal?: boolean }[] = [
   { href: '#features', label: 'Features' },
-  { href: '#link-break', label: 'Link & break' },
+  { href: '#link-break', label: 'Combined booking page' },
   { href: '/solutions', label: 'Solutions', internal: true },
   { href: '#pricing', label: 'Pricing' },
   { href: '/help', label: 'Help', internal: true },

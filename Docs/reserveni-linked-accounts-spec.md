@@ -1210,6 +1210,21 @@ titles. This is an acceptable read-only enrichment, but it stretches the "appoin
 framing of §3 and should be acknowledged: a linked venue *sees* (never edits) the other
 venue's non-appointment calendar entities.
 
+**Amended 2026-09-19: linked columns draw closures, unavailability and amended hours exactly as own
+columns do.** A linked column's stripes come from the same two builders and the same partition as an
+own column (`buildLinkedColumnScheduleClosureBlocks`): the partner venue's opening hours, closures and
+amended hours; the partner calendar's schedule periods, rota, days off and per-date hours; its leave
+with its Label. They draw as their own-column counterparts (rose "Venue closed", sky "{calendar}
+unavailable", violet leave with the Label's words, slate "{calendar} closed" for both), but carry their
+own types (`linked_business_closed`, `linked_calendar_closed`, `linked_leave`, `linked_both_closed`) so
+they keep blocking staff bookings, and they sit in the diary's one block list, so the occupancy checks
+read them. Read-only linked columns (time only, or view only) draw the same stripes without the
+interactions. A linked column's resolved hours widen the grid as an own calendar's do, and its header
+line carries the "(calendar 09:00–17:00)" and "Closed (outside business hours)" forms. An older feed
+without `schedule` and `hours` keeps the template-only slate "Linked venue closed" stripe. Amended hours
+have no stripe of their own on either kind of column, by design: the grid and the stripes follow the
+resolved hours. Timezones are not converted: a partner in another timezone is drawn on its own clock.
+
 ### 8.3 Incoming-request banner
 
 **Amended 2026-09-19.** `GET /api/venue/account-links/incoming` also carries `collective` on each request (the invitation that rides on it, derived from the `invited` member row hosted by the requester) and `collectiveSetup[]` for a host whose collective has two venues in and no service with a calendar. The banner says "{venue} wants to link with your venue and start {collective}" and, for the host, "{venue} joined {collective}. Two short steps make your shared booking page live" with **Continue setup**. Both link into the Linked accounts tab with `?review={linkId}` or `?setup={collectiveId}`, which open the right dialog.

@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildLinkedColumnClosureBlocks,
+  buildLinkedColumnScheduleClosureBlocks,
   buildPractitionerScheduleClosureBlocks,
+  openRangesBounds,
+  scheduleClosureBlockLabel,
+  scheduleClosureDisplayType,
   buildVenueScheduleClosureBlocks,
   closedRangesFromOpenWindows,
   labelledLeaveForPractitionerOnDate,
@@ -9,6 +13,7 @@ import {
 } from '@/lib/calendar/schedule-closure-blocks';
 import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
 import type { WorkingHours } from '@/types/booking-models';
+import { isOccupyingBlock } from '@/lib/calendar/occupying-blocks';
 
 describe('buildLinkedColumnClosureBlocks', () => {
   // Same 10:00–18:00 window on every weekday, so the test is weekday-agnostic.
@@ -432,5 +437,80 @@ describe('closure Labels on the diary (R36)', () => {
       'annual 720-930',
       'sick 930-960',
     ]);
+  });
+});
+
+describe('buildLinkedColumnScheduleClosureBlocks (spec §8.2, a linked column drawn as its owner draws it)', () => {
+  const everyDay = (start: string, end: string) =>
+    Object.fromEntries(['0', '1', '2', '3', '4', '5', '6'].map((d) => [d, [{ start, end }]]));
+  const openingHours: OpeningHours = Object.fromEntries(
+    ['0', '1', '2', '3', '4', '5', '6'].map((d) => [d, { periods: [{ open: '09:00', close: '17:00' }] }]),
+  );
+  const schedule = { working_hours: everyDay('08:00', '18:00'), days_off: [], availability_exceptions: null, schedule_periods: null };
+  const grid = { start: 7 * 60, end: 21 * 60 };
+  const base = { columnId: 'linked:v2:p9', practitionerId: 'p9', timeZone: 'Europe/London', gridBounds: grid };
+
+  it('returns null without the owner’s schedule and hours, so the caller keeps the template-only stripes', () => {
+    expect(buildLinkedColumnScheduleClosureBlocks({ ...base, schedule: null, hours: null, dateYmd: '2030-06-03' })).toBeNull();
+  });
+
+  it('splits the partner venue’s closed hours from the partner calendar’s, keyed on the column, each keeping blocking', () => {
+    const blocks = buildLinkedColumnScheduleClosureBlocks({
+      ...base,
+      schedule,
+      hours: { openingHours, venueWideBlocks: [], leavePeriods: [] },
+      dateYmd: '2030-06-03',
+    })!;
+    const rows = blocks
+      .map((b) => [b.block_type, b.start_time.slice(0, 5), b.end_time.slice(0, 5)])
+      .sort((a, b) => a[1]!.localeCompare(b[1]!));
+    expect(rows).toEqual([
+      ['linked_both_closed', '07:00', '08:00'],
+      ['linked_business_closed', '08:00', '09:00'],
+      ['linked_business_closed', '17:00', '18:00'],
+      ['linked_both_closed', '18:00', '21:00'],
+    ]);
+    expect(blocks.every((b) => b.calendar_id === 'linked:v2:p9' && b.practitioner_id === null)).toBe(true);
+    expect(blocks.every((b) => isOccupyingBlock(b.block_type))).toBe(true);
+  });
+
+  it('draws a partner calendar’s day off as unavailable and its leave with its Label, in the owner’s words', () => {
+    const dayOff = buildLinkedColumnScheduleClosureBlocks({
+      ...base,
+      schedule: { ...schedule, days_off: ['2030-06-03'] },
+      hours: { openingHours, venueWideBlocks: [], leavePeriods: [] },
+      dateYmd: '2030-06-03',
+    })!;
+    expect(dayOff.map((b) => b.block_type).sort()).toEqual(['linked_both_closed', 'linked_both_closed', 'linked_calendar_closed']);
+    expect(scheduleClosureBlockLabel('linked_calendar_closed', { columnName: 'David', startTime: '09:00', endTime: '17:00' })).toBe(
+      'David unavailable 09:00 to 17:00',
+    );
+
+    const leave = buildLinkedColumnScheduleClosureBlocks({
+      ...base,
+      schedule,
+      hours: {
+        openingHours,
+        venueWideBlocks: [],
+        leavePeriods: [{ practitioner_id: 'p9', start_date: '2030-06-03', end_date: '2030-06-03', leave_type: 'sick' }],
+      },
+      dateYmd: '2030-06-03',
+    })!;
+    expect(leave.some((b) => b.block_type === 'linked_leave' && b.leave_type === 'sick')).toBe(true);
+    expect(scheduleClosureBlockLabel('linked_leave', { leaveType: 'sick', startTime: '07:00', endTime: '21:00' })).toBe('Unavailable 07:00 to 21:00');
+    expect(scheduleClosureBlockLabel('linked_business_closed', { startTime: '17:00', endTime: '18:00' })).toBe('Venue closed 17:00 to 18:00');
+  });
+
+  it('draws each linked state as its own-column counterpart', () => {
+    expect(scheduleClosureDisplayType('linked_business_closed')).toBe('venue_closed');
+    expect(scheduleClosureDisplayType('linked_calendar_closed')).toBe('practitioner_closed');
+    expect(scheduleClosureDisplayType('linked_leave')).toBe('practitioner_leave');
+    expect(scheduleClosureDisplayType('linked_both_closed')).toBe('venue_and_calendar_closed');
+    expect(scheduleClosureDisplayType('venue_closed')).toBe('venue_closed');
+  });
+
+  it('widens to the earliest start and latest end of resolved open ranges', () => {
+    expect(openRangesBounds([[{ start: 480, end: 720 }], null, [{ start: 600, end: 1200 }]])).toEqual({ start: 480, end: 1200 });
+    expect(openRangesBounds([[], null])).toBeNull();
   });
 });

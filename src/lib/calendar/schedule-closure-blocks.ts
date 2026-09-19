@@ -62,6 +62,17 @@ export type ScheduleClosureBlockType =
    */
   | 'linked_venue_closed'
   /**
+   * The four states of a LINKED column resolved as its owner resolves them (spec §8.2, amended
+   * 2026-09-19): the partner venue shut (drawn as `venue_closed`), the partner calendar not working
+   * (`practitioner_closed`), the partner calendar on leave (`practitioner_leave`), and both
+   * (`venue_and_calendar_closed`). Separate types, because every one of them keeps blocking (see
+   * `linked_venue_closed` above) while looking exactly like its own-column counterpart.
+   */
+  | 'linked_business_closed'
+  | 'linked_calendar_closed'
+  | 'linked_leave'
+  | 'linked_both_closed'
+  /**
    * Minutes where the venue is shut AND the calendar is not working. Produced
    * by {@link partitionScheduleClosureBlocks}, never by a builder directly, so
    * the two single-cause stripes ("Venue closed", "<calendar> unavailable")
@@ -163,6 +174,76 @@ export function buildLinkedColumnClosureBlocks(params: {
     reason: null,
     block_type: 'linked_venue_closed' as const,
   }));
+}
+
+/**
+ * The closure stripes for one LINKED column, resolved exactly as the owner's own diary resolves
+ * them and split the same way (spec §8.2, amended 2026-09-19): the partner venue's opening hours,
+ * closures and amended hours; the partner calendar's schedule periods, rota, days off and per-date
+ * hours; its leave with its Label. The same two builders and the same partition as an own column,
+ * then each stripe is retyped to its linked counterpart so it keeps blocking, and keyed on the
+ * column id. Null when the feed carries no `schedule` or `hours`, so the caller falls back to
+ * {@link buildLinkedColumnClosureBlocks}.
+ */
+export function buildLinkedColumnScheduleClosureBlocks(params: {
+  columnId: string;
+  practitionerId: string;
+  /** The partner calendar's schedule row (`LinkedPractitioner['schedule']`); read by `calendarHours`. */
+  schedule: object | null | undefined;
+  hours:
+    | { openingHours: OpeningHours | null; venueWideBlocks: AvailabilityBlock[]; leavePeriods: PractitionerLeavePeriodInput[] }
+    | null
+    | undefined;
+  dateYmd: string;
+  timeZone: string;
+  gridBounds: { start: number; end: number };
+}): ScheduleClosureCalendarBlock[] | null {
+  const { columnId, practitionerId, schedule, hours, dateYmd, timeZone, gridBounds } = params;
+  if (!schedule || !hours) return null;
+  const practitioner = { ...(schedule as object), id: practitionerId, is_active: true } as PractitionerClosureInput;
+  const venueBlocks = buildVenueScheduleClosureBlocks({
+    openingHours: hours.openingHours,
+    venueWideBlocks: hours.venueWideBlocks,
+    fromDate: dateYmd,
+    toDate: dateYmd,
+    columnIds: [practitionerId],
+    timeZone,
+    gridBounds,
+  });
+  const calendarBlocks = buildPractitionerScheduleClosureBlocks({
+    practitioners: [practitioner],
+    leavePeriods: hours.leavePeriods,
+    fromDate: dateYmd,
+    toDate: dateYmd,
+    openingHours: hours.openingHours,
+    timeZone,
+    gridBounds,
+  });
+  return partitionScheduleClosureBlocks([...venueBlocks, ...calendarBlocks]).map((b, i) => ({
+    ...b,
+    id: `linked-closed:${columnId}:${dateYmd}:${i}`,
+    practitioner_id: null,
+    calendar_id: columnId,
+    block_type: LINKED_TYPE_FOR[b.block_type] ?? b.block_type,
+  }));
+}
+
+/**
+ * The earliest start and latest end across already-resolved open ranges (a linked column's, from
+ * `linkedPractitionerOpenRanges`), in minutes from midnight; the diary widens its grid to these as
+ * it does to its own calendars' hours.
+ */
+export function openRangesBounds(ranges: ReadonlyArray<ReadonlyArray<MinuteRange> | null | undefined>): { start: number; end: number } | null {
+  let start = Number.POSITIVE_INFINITY;
+  let end = Number.NEGATIVE_INFINITY;
+  for (const list of ranges) {
+    for (const r of list ?? []) {
+      if (!Number.isFinite(r.start) || !Number.isFinite(r.end) || r.end <= r.start) continue;
+      start = Math.min(start, r.start);
+      end = Math.max(end, r.end);
+    }
+  }
+  return Number.isFinite(start) && Number.isFinite(end) ? { start, end } : null;
 }
 
 /** Minutes outside `open` within [boundsStart, boundsEnd). */
@@ -471,9 +552,46 @@ export function isScheduleClosureBlockType(blockType: string | undefined): boole
     blockType === 'practitioner_closed' ||
     blockType === 'practitioner_leave' ||
     blockType === 'linked_venue_closed' ||
-    blockType === 'venue_and_calendar_closed'
+    blockType === 'venue_and_calendar_closed' ||
+    isLinkedResolvedClosureBlockType(blockType)
   );
 }
+
+/** The linked column's resolved states, which draw as their own-column counterparts. */
+export function isLinkedResolvedClosureBlockType(blockType: string | undefined): boolean {
+  return (
+    blockType === 'linked_business_closed' ||
+    blockType === 'linked_calendar_closed' ||
+    blockType === 'linked_leave' ||
+    blockType === 'linked_both_closed'
+  );
+}
+
+/**
+ * The own-column type a block draws as: a linked column's resolved states borrow their
+ * counterpart's tint, accent and words, so the two kinds of column read the same.
+ */
+export function scheduleClosureDisplayType(blockType: string | undefined): string | undefined {
+  switch (blockType) {
+    case 'linked_business_closed':
+      return 'venue_closed';
+    case 'linked_calendar_closed':
+      return 'practitioner_closed';
+    case 'linked_leave':
+      return 'practitioner_leave';
+    case 'linked_both_closed':
+      return 'venue_and_calendar_closed';
+    default:
+      return blockType;
+  }
+}
+
+const LINKED_TYPE_FOR: Record<string, ScheduleClosureBlockType> = {
+  venue_closed: 'linked_business_closed',
+  practitioner_closed: 'linked_calendar_closed',
+  practitioner_leave: 'linked_leave',
+  venue_and_calendar_closed: 'linked_both_closed',
+};
 
 function hm(t: string): string {
   return t.slice(0, 5);
@@ -503,6 +621,8 @@ export function scheduleClosureBlockLabel(
   opts?: { columnName?: string | null; startTime?: string; endTime?: string; leaveType?: string | null },
 ): string {
   const range = opts?.startTime && opts?.endTime ? ` ${hm(opts.startTime)} to ${hm(opts.endTime)}` : '';
+  // A linked column's resolved states say what their own-column counterparts say.
+  blockType = scheduleClosureDisplayType(blockType);
   if (blockType === 'practitioner_leave') return `${leaveStripeLabel(opts?.leaveType)}${range}`;
   if (blockType === 'venue_closed') return `Venue closed${range}`;
   if (blockType === 'practitioner_closed') {

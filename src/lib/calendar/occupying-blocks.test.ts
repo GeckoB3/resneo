@@ -113,3 +113,11 @@ describe('the diary applies the rule (SA-H3, SA-H5)', () => {
     expect(source).toContain("pointerEvents: isDragging || clickThrough ? 'none' : undefined");
   });
 });
+
+describe('a linked column’s stripes (spec §8.2)', () => {
+  it('keep blocking whatever they draw as: a partner’s closed hours are not this venue’s to work past', () => {
+    for (const type of ['linked_venue_closed', 'linked_business_closed', 'linked_calendar_closed', 'linked_leave', 'linked_both_closed']) {
+      expect(isOccupyingBlock(type)).toBe(true);
+    }
+  });
+});

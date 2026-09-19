@@ -144,8 +144,12 @@ import {
   isScheduleClosureBlockType,
   partitionScheduleClosureBlocks,
   scheduleClosureBlockLabel,
+  buildLinkedColumnScheduleClosureBlocks,
+  openRangesBounds,
+  scheduleClosureDisplayType,
 } from '@/lib/calendar/schedule-closure-blocks';
 import { isNonWorkingBlock, isOccupyingBlock } from '@/lib/calendar/occupying-blocks';
+import { getWorkingRanges } from '@/lib/availability/appointment-engine';
 import { type PractitionerLeavePeriodInput } from '@/lib/calendar/schedule-closure-blocks';
 import { formatResolvedHoursLineForDate, formatWorkingHoursLineForDate } from '@/lib/calendar/format-working-hours-for-date';
 import { calendarHours } from '@/lib/availability/calendar-hours';
@@ -416,7 +420,16 @@ function linkedColumnOpenRanges(col: LinkedColumn, dateYmd: string): Array<{ sta
 
 function linkedColumnHoursLine(col: LinkedColumn, dateYmd: string): string {
   const open = linkedColumnOpenRanges(col, dateYmd);
-  return open ? formatResolvedHoursLineForDate(open, null) : formatWorkingHoursLineForDate(col.workingHours, dateYmd, col.venueTimezone);
+  if (!open) return formatWorkingHoursLineForDate(col.workingHours, dateYmd, col.venueTimezone);
+  // The partner venue's own hours for the date, so "(calendar 09:00–17:00)" and
+  // "Closed (outside business hours)" read on a linked column as they do on an own one.
+  const venue = col.hours ? resolveVenueWideAllowedMinuteRanges(col.hours.openingHours, dateYmd, col.hours.venueWideBlocks) : null;
+  const venueRanges = venue?.kind === 'allowed' ? venue.ranges : venue?.kind === 'closed' ? [] : null;
+  // The calendar's resolved hours before the venue's are applied, as the own column passes them.
+  const calendarOnly = col.schedule
+    ? getWorkingRanges({ id: col.practitionerId, ...col.schedule } as unknown as Parameters<typeof getWorkingRanges>[0], dateYmd)
+    : open;
+  return formatResolvedHoursLineForDate(calendarOnly, venueRanges);
 }
 
 type DayGridColumn =
@@ -674,17 +687,19 @@ function calendarBlockShellClass(bl: CalendarBlock): string {
   }
   // Two single-cause tints: rose when the business is shut but the calendar
   // would work, sky when the business is open but the calendar is not. Slate
-  // means both, or a linked venue's own closed hours.
-  if (bl.block_type === 'venue_closed') {
+  // means both, or a linked venue's own closed hours. A linked column's resolved
+  // states draw as their own-column counterparts (spec §8.2).
+  const type = scheduleClosureDisplayType(bl.block_type);
+  if (type === 'venue_closed') {
     return 'border-rose-200 bg-rose-50/95';
   }
-  if (bl.block_type === 'practitioner_closed') {
+  if (type === 'practitioner_closed') {
     return 'border-sky-200 bg-sky-50/95';
   }
-  if (bl.block_type === 'practitioner_leave') {
+  if (type === 'practitioner_leave') {
     return 'border-violet-200 bg-violet-50/95';
   }
-  if (bl.block_type === 'venue_and_calendar_closed' || bl.block_type === 'linked_venue_closed') {
+  if (type === 'venue_and_calendar_closed' || type === 'linked_venue_closed') {
     return 'border-slate-300 bg-slate-200/90';
   }
   return 'border-slate-300 bg-slate-200/90 hover:bg-slate-300/90';
@@ -693,18 +708,20 @@ function calendarBlockShellClass(bl: CalendarBlock): string {
 /** Heading text colour that matches {@link calendarBlockShellClass}. */
 function calendarBlockHeadingTextClass(bl: CalendarBlock): string {
   if (isBreakCalendarBlock(bl)) return 'text-amber-950';
-  if (bl.block_type === 'venue_closed') return 'text-rose-950';
-  if (bl.block_type === 'practitioner_closed') return 'text-sky-950';
-  if (bl.block_type === 'practitioner_leave') return 'text-violet-950';
+  const type = scheduleClosureDisplayType(bl.block_type);
+  if (type === 'venue_closed') return 'text-rose-950';
+  if (type === 'practitioner_closed') return 'text-sky-950';
+  if (type === 'practitioner_leave') return 'text-violet-950';
   return 'text-slate-900';
 }
 
 function calendarBlockAccentColor(bl: CalendarBlock): string {
   if (isBreakCalendarBlock(bl)) return '#d97706';
-  if (bl.block_type === 'venue_closed') return '#e11d48';
-  if (bl.block_type === 'practitioner_closed') return '#0284c7';
-  if (bl.block_type === 'practitioner_leave') return '#7c3aed';
-  if (bl.block_type === 'venue_and_calendar_closed' || bl.block_type === 'linked_venue_closed') {
+  const type = scheduleClosureDisplayType(bl.block_type);
+  if (type === 'venue_closed') return '#e11d48';
+  if (type === 'practitioner_closed') return '#0284c7';
+  if (type === 'practitioner_leave') return '#7c3aed';
+  if (type === 'venue_and_calendar_closed' || type === 'linked_venue_closed') {
     return '#94a3b8';
   }
   return '#94a3b8';
@@ -2883,9 +2900,12 @@ const LinkedDayColumn = memo(function LinkedDayColumn({
   onCreateAt,
   bookingRowOverlayForId,
   serviceMap,
+  closureBlocks = [],
 }: {
   column: LinkedColumn;
   bookings: LinkedBooking[];
+  /** The column's closure stripes (spec §8.2), drawn as the native grid draws them, read-only. */
+  closureBlocks?: CalendarBlock[];
   /** The owner venue's services, for processing strips on this column's bars. */
   serviceMap?: Map<string, AppointmentService>;
   eventBlocks?: ScheduleBlockDTO[];
@@ -2938,6 +2958,30 @@ const LinkedDayColumn = memo(function LinkedDayColumn({
               style={{ top: i * slotHeightPx }}
               aria-hidden
             />
+          );
+        })}
+        {closureBlocks.map((bl) => {
+          const top = linkedSlotTop(bl.start_time, startHour, slotHeightPx);
+          const height = Math.max(
+            (minutesBetweenStartAndEnd(bl.start_time, bl.end_time) / SLOT_MINUTES) * slotHeightPx,
+            slotHeightPx * 0.5,
+          );
+          const heading = calendarBlockHeading(bl, column.practitionerName);
+          return (
+            <div
+              key={bl.id}
+              className={`absolute left-0.5 right-0.5 z-[1] flex flex-row overflow-hidden rounded-lg border text-left shadow-sm ${calendarBlockShellClass(bl)}`}
+              style={{ top, height, borderLeftWidth: 3, borderLeftColor: calendarBlockAccentColor(bl) }}
+              title={heading}
+              aria-label={heading}
+            >
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col justify-start overflow-hidden px-2.5 py-2">
+                <span className={`truncate text-[13px] font-extrabold tracking-tight ${calendarBlockHeadingTextClass(bl)}`}>{heading}</span>
+                <span className="mt-0.5 block text-[11px] font-medium leading-snug tabular-nums text-slate-600/90">
+                  {bl.start_time.slice(0, 5)} – {bl.end_time.slice(0, 5)}
+                </span>
+              </div>
+            </div>
           );
         })}
         {resourceMintSlots.map((m, i) => (
@@ -3790,11 +3834,27 @@ export function PractitionerCalendarView({
       // venue's hours OR any visible calendar's own hours. A calendar working
       // 08:00-20:00 in a venue open 09:00-18:00 draws 08:00-20:00, with the
       // stripes saying which side is closed in each hour.
-      const calendarBounds = calendarWorkingBoundsForDates(
+      const ownBounds = calendarWorkingBoundsForDates(
         practitioners.filter((p) => p.is_active && p.calendar_type !== 'resource'),
         viewMode === 'day' ? activeDayDate : listFromTo.from,
         viewMode === 'day' ? activeDayDate : listFromTo.to,
       );
+      // A linked column is drawn to its own hours too (spec §8.2): a partner working past
+      // this venue's grid end used to be clipped where an own calendar would widen the grid.
+      const linkedBounds =
+        viewMode === 'day'
+          ? openRangesBounds(
+              linkedVenues.flatMap((v) =>
+                v.practitioners
+                  .filter((p) => p.isActive && (visibleLinkedColumnIds === null || visibleLinkedColumnIds.includes(linkedColumnKey(v.venueId, p.id))))
+                  .map((p) => linkedPractitionerOpenRanges(p.id, p.schedule, v.hours, activeDayDate)),
+              ),
+            )
+          : null;
+      const calendarBounds =
+        ownBounds && linkedBounds
+          ? { start: Math.min(ownBounds.start, linkedBounds.start), end: Math.max(ownBounds.end, linkedBounds.end) }
+          : (ownBounds ?? linkedBounds);
       const base = calendarBounds
         ? {
             startHour: Math.min(venueBase.startHour, Math.floor(calendarBounds.start / 60)),
@@ -4063,6 +4123,31 @@ export function PractitionerCalendarView({
   const clearGridExtensionRef = useRef(clearGridExtension);
   clearGridExtensionRef.current = clearGridExtension;
 
+  /** Every practitioner column exposed by a linked venue (§8.2). */
+  const linkedColumns = useMemo<LinkedColumn[]>(() => {
+    const out: LinkedColumn[] = [];
+    for (const v of linkedVenues) {
+      for (const p of v.practitioners) {
+        out.push({
+          key: linkedColumnKey(v.venueId, p.id),
+          venueId: v.venueId,
+          venueName: v.venueName,
+          venueTimezone: v.venueTimezone?.trim() || venueTimezone,
+          linkId: v.linkId,
+          practitionerId: p.id,
+          practitionerName: p.name,
+          practitionerActive: p.isActive,
+          workingHours: p.workingHours,
+          schedule: p.schedule,
+          hours: v.hours,
+          visibility: v.visibility,
+          action: v.action,
+        });
+      }
+    }
+    return out;
+  }, [linkedVenues, venueTimezone]);
+
   const scheduleClosureBlocks = useMemo((): CalendarBlock[] => {
     const nativeColumnIds = practitioners
       .filter((p) => p.is_active && p.calendar_type !== 'resource')
@@ -4090,15 +4175,45 @@ export function PractitionerCalendarView({
       gridBounds,
     });
     // One explanation per minute: venue-only, calendar-only, or both.
-    return partitionScheduleClosureBlocks([...venueBlocks, ...practitionerBlocks]) as CalendarBlock[];
-  }, [practitioners, openingHours, venueWideBlocks, leavePeriods, listFromTo.from, listFromTo.to, venueTimezone, viewMode, startHour, endHour]);
+    const own = partitionScheduleClosureBlocks([...venueBlocks, ...practitionerBlocks]) as CalendarBlock[];
+    if (viewMode !== 'day') return own;
+    // Linked columns, resolved as their owner resolves them and split the same way (spec §8.2);
+    // the weekly template alone for an older feed.
+    const linked: CalendarBlock[] = [];
+    for (const col of linkedColumns) {
+      const tz = col.venueTimezone || venueTimezone;
+      const resolved = buildLinkedColumnScheduleClosureBlocks({
+        columnId: col.key,
+        practitionerId: col.practitionerId,
+        schedule: col.schedule,
+        hours: col.hours,
+        dateYmd: activeDayDate,
+        timeZone: tz,
+        gridBounds: { start: startHour * 60, end: endHour * 60 },
+      });
+      const blocksForColumn =
+        resolved ??
+        buildLinkedColumnClosureBlocks({
+          columnId: col.key,
+          workingHours: col.workingHours,
+          openRanges: null,
+          dateYmd: activeDayDate,
+          timeZone: tz,
+          gridStartHour: startHour,
+          gridEndHour: endHour,
+        });
+      linked.push(...(blocksForColumn as unknown as CalendarBlock[]));
+    }
+    return [...own, ...linked];
+  }, [practitioners, openingHours, venueWideBlocks, leavePeriods, listFromTo.from, listFromTo.to, venueTimezone, viewMode, startHour, endHour, linkedColumns, activeDayDate]);
 
   /** Column id to display name, for "<calendar> unavailable" stripes. */
   const columnNameById = useMemo(() => {
     const m = new Map<string, string>();
     for (const p of practitioners) m.set(p.id, p.name);
+    for (const c of linkedColumns) m.set(c.key, c.practitionerName);
     return m;
-  }, [practitioners]);
+  }, [practitioners, linkedColumns]);
   const blockColumnName = useCallback(
     (bl: CalendarBlock) => columnNameById.get(bl.calendar_id ?? bl.practitioner_id ?? '') ?? null,
     [columnNameById],
@@ -4697,30 +4812,6 @@ export function PractitionerCalendarView({
     return new Set(calendarFilteredPractitioners.filter((p) => !shown.has(p.id)).map((p) => p.id));
   }, [workingHoursFilterActive, calendarFilteredPractitioners, filteredPractitioners]);
 
-  /** Every practitioner column exposed by a linked venue (§8.2). */
-  const linkedColumns = useMemo<LinkedColumn[]>(() => {
-    const out: LinkedColumn[] = [];
-    for (const v of linkedVenues) {
-      for (const p of v.practitioners) {
-        out.push({
-          key: linkedColumnKey(v.venueId, p.id),
-          venueId: v.venueId,
-          venueName: v.venueName,
-          venueTimezone: v.venueTimezone?.trim() || venueTimezone,
-          linkId: v.linkId,
-          practitionerId: p.id,
-          practitionerName: p.name,
-          practitionerActive: p.isActive,
-          workingHours: p.workingHours,
-          schedule: p.schedule,
-          hours: v.hours,
-          visibility: v.visibility,
-          action: v.action,
-        });
-      }
-    }
-    return out;
-  }, [linkedVenues, venueTimezone]);
 
   /** Linked columns visible on the grid. */
   const visibleLinkedColumns = useMemo(() => {
@@ -8052,27 +8143,14 @@ export function PractitionerCalendarView({
                   : eventBlocksForGrid.filter(
                       (b) => b.calendar_id === pracId && b.date === date,
                     );
-                const pracBlocks = isLinkedCol
-                  ? // §8.2 — a linked column reflects the LINKED venue's own opening
-                    // hours: shade the hours it is closed (e.g. if it opens later than
-                    // this venue) from its working-hours template in its own timezone.
-                    (linkedCol
-                      ? (buildLinkedColumnClosureBlocks({
-                          columnId: pracId,
-                          workingHours: linkedCol.workingHours,
-                          openRanges: linkedColumnOpenRanges(linkedCol, date),
-                          dateYmd: date,
-                          timeZone: linkedCol.venueTimezone || venueTimezone,
-                          gridStartHour: startHour,
-                          gridEndHour: endHour,
-                        }) as unknown as CalendarBlock[])
-                      : [])
-                  : displayBlocks.filter(
-                      (bl) =>
-                        columnIdForBlock(bl) === pracId &&
-                        bl.block_date === date &&
-                        bl.block_type !== 'class_session',
-                    );
+                // §8.2: a linked column's closure stripes come from the same list as an own
+                // column's, resolved the way its owner resolves them (see scheduleClosureBlocks).
+                const pracBlocks = displayBlocks.filter(
+                  (bl) =>
+                    columnIdForBlock(bl) === pracId &&
+                    bl.block_date === date &&
+                    bl.block_type !== 'class_session',
+                );
                 return (
                   <div key={pracId} className="min-w-[min(16rem,calc(100vw-5.5rem))] flex-1 border-r border-slate-300 last:border-r-0 sm:min-w-[240px]">
                     <div className="relative" style={{ height: TOTAL_SLOTS * slotHeightPx }}>
@@ -8888,6 +8966,9 @@ export function PractitionerCalendarView({
                       key={col.key}
                       column={col}
                       bookings={linkedBookingsFor(col, date)}
+                      closureBlocks={displayBlocks.filter(
+                        (bl) => columnIdForBlock(bl) === col.key && bl.block_date === date && isScheduleClosureBlock(bl),
+                      )}
                       eventBlocks={linkedSchedule.eventBlocks}
                       classBlocks={linkedSchedule.classBlocks}
                       resourceMintSlots={linkedResourceAvailabilityByColumnKey.get(col.key) ?? []}

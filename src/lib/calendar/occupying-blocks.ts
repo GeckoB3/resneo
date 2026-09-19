@@ -36,6 +36,11 @@ const NON_OCCUPYING_BLOCK_TYPES = new Set([
  * is not in the building. Classes, events and blocks staff made by hand stay
  * hard conflicts too, and an unrecognised type occupies, so anything added
  * later is refused until someone decides otherwise.
+ *
+ * So are every linked column's stripes (`linked_venue_closed`, and the resolved
+ * `linked_business_closed`, `linked_calendar_closed`, `linked_leave` and
+ * `linked_both_closed`): they look like their own-column counterparts, but
+ * working past a partner's closing time is not this venue's call to make.
  */
 export function isOccupyingBlock(blockType: string | undefined): boolean {
   return !NON_OCCUPYING_BLOCK_TYPES.has(blockType ?? '');

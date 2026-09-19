@@ -1,8 +1,10 @@
--- Resneo: re-offering reconnects only unchanged services (20270216170000; plan DL5, RT2-27).
+-- Resneo: re-offering reconnects only unchanged services (20270216170000; plan DL5, RT2-27;
+-- 20270219140000, L13).
 --
 -- Proves: after a member leaves and rejoins while two offerings are withdrawn, re-offering them
--- reconnects the member's released service that is unchanged since its release, and gives the one
--- changed since a new link, leaving the changed service's old link released.
+-- reconnects the member's released service that is unchanged since its release. The one changed
+-- since is now the member's own same-named service, so (L13) the member is ASKED whether to use it
+-- rather than given a second copy: no new link yet, and the changed service's old link stays released.
 --
 -- Run with:  supabase test db
 -- Each test file runs inside a transaction that is rolled back afterwards.
@@ -64,10 +66,18 @@ SELECT is(
   array['reconnected', 'true', '00000000-0000-0000-0000-0000003a0e03'],
   'Re-offering reconnects the member''s unchanged released service');
 SELECT is(
-  (SELECT array[l.provenance, coalesce(l.replica_service_id::text, 'none')] FROM public.collective_service_replicas l
-   JOIN public.collective_service_items i ON i.id = l.collective_service_item_id
-   WHERE i.master_service_id = '00000000-0000-0000-0000-0000003a05b1' AND l.released_at IS NULL),
-  array['created', 'none'], 'DL5: a service changed since its release gets a new link');
+  (SELECT array[
+     (SELECT count(*)::text FROM public.collective_service_replicas l
+      JOIN public.collective_service_items i ON i.id = l.collective_service_item_id
+      WHERE i.master_service_id = '00000000-0000-0000-0000-0000003a05b1' AND l.released_at IS NULL),
+     (SELECT count(*)::text FROM public.collective_audit_events e
+      JOIN public.collective_service_items i ON i.id = e.item_id
+      WHERE e.event_type = 'adoption_requested'
+        AND i.master_service_id = '00000000-0000-0000-0000-0000003a05b1'
+        AND e.target_venue_id = '00000000-0000-0000-0000-0000003a0f02'
+        AND e.service_id = (SELECT replica_service_id FROM first_links WHERE master = '00000000-0000-0000-0000-0000003a05b1'))]),
+  array['0', '1'],
+  'DL5 + L13: a service changed since its release is the member''s own same-named service now, so the member is asked, not given a new link');
 SELECT ok(
   (SELECT released_at IS NOT NULL FROM public.collective_service_replicas
    WHERE id = (SELECT id FROM first_links WHERE master = '00000000-0000-0000-0000-0000003a05b1')),

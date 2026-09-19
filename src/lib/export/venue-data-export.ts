@@ -4,6 +4,11 @@ import { loadRowTotalResolver, type VisitBookingRow } from '@/lib/booking/paymen
 import { normaliseGuestNamePart } from '@/lib/guests/name';
 import { mergeVenueTerminology } from '@/lib/dashboard/merge-venue-terminology';
 import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
+import {
+  calendarDurationMinutes,
+  calendarPricePence,
+  type CalendarAssignmentValues,
+} from '@/lib/booking/calendar-service-terms';
 import type { BookingModel } from '@/types/booking-models';
 import { selectAllPages } from '@/lib/reports/select-all-pages';
 
@@ -874,13 +879,17 @@ export async function buildServicesExport(clients: ExportClients, venue: ExportV
   ];
 
   const rows = services.map((s): ExportCell[] => {
+    // A calendar's own length or price, when it differs from the service's, through the terms
+    // resolver (TERMS-04): the raw columns are never read by hand outside it.
     const offered = (assignments.get(s.id) ?? [])
       .filter((a) => ownCalendarIds.has(a.calendar_id))
       .map((a) => {
         const name = calendars.get(a.calendar_id)?.name ?? '';
+        const minutes = calendarDurationMinutes(s.duration_minutes ?? 0, a.values);
+        const price = calendarPricePence(s.price_pence, a.values);
         const extras = [
-          a.custom_duration_minutes != null ? `${a.custom_duration_minutes} min` : null,
-          a.custom_price_pence != null ? money(a.custom_price_pence) : null,
+          minutes !== (s.duration_minutes ?? 0) ? `${minutes} min` : null,
+          price !== (s.price_pence ?? null) ? money(price) : null,
         ].filter(Boolean);
         return extras.length > 0 ? `${name} (${extras.join(', ')})` : name;
       })
@@ -951,25 +960,17 @@ function processingMinutes(s: ServiceRow): number | null {
 
 async function loadAssignments(
   db: SupabaseClient,
-): Promise<Map<string, Array<{ calendar_id: string; custom_duration_minutes: number | null; custom_price_pence: number | null }>>> {
-  // No venue_id on this table: rows are scoped afterwards to the venue's own calendars.
+): Promise<Map<string, Array<{ calendar_id: string; values: CalendarAssignmentValues }>>> {
+  // No venue_id on this table: rows are scoped afterwards to the venue's own calendars. The
+  // assignment row is carried whole for the terms resolver; its columns are not read here.
   const { data, error } = await db
     .from('calendar_service_assignments')
     .select('service_item_id, calendar_id, custom_duration_minutes, custom_price_pence');
   if (error) throw new Error(error.message);
-  const out = new Map<string, Array<{ calendar_id: string; custom_duration_minutes: number | null; custom_price_pence: number | null }>>();
-  for (const a of (data ?? []) as Array<{
-    service_item_id: string;
-    calendar_id: string;
-    custom_duration_minutes?: number | null;
-    custom_price_pence?: number | null;
-  }>) {
+  const out = new Map<string, Array<{ calendar_id: string; values: CalendarAssignmentValues }>>();
+  for (const a of (data ?? []) as Array<{ service_item_id: string; calendar_id: string } & CalendarAssignmentValues>) {
     const list = out.get(a.service_item_id) ?? [];
-    list.push({
-      calendar_id: a.calendar_id,
-      custom_duration_minutes: a.custom_duration_minutes ?? null,
-      custom_price_pence: a.custom_price_pence ?? null,
-    });
+    list.push({ calendar_id: a.calendar_id, values: a });
     out.set(a.service_item_id, list);
   }
   return out;

@@ -144,6 +144,10 @@ export const API_ERROR_CODES = [
   'COLLECTIVE_SERVICE_UPDATING',
   /** Undo is only offered for a minute after a host's save (410). */
   'COLLECTIVE_UNDO_EXPIRED',
+  /** Accepting a link "and join the collective" when the host has no open invitation for it (404). Accept the link alone, or reload. */
+  'COLLECTIVE_INVITATION_NOT_FOUND',
+  /** A collective needs the link at full access; accept the link at full, or accept it alone (400). */
+  'COLLECTIVE_LINK_NOT_FULL',
   /**
    * A bulk change would stop a calendar offering a service it still has bookings for. Nothing was
    * written: open that service to see the bookings, then send it again acknowledged.

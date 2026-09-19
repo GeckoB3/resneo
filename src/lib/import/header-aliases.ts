@@ -70,6 +70,23 @@ const CLIENT_ALIASES: Record<string, string> = {
   comments: 'notes',
   tags: 'tags',
   'marketing consent': 'marketing_consent',
+  'accepts marketing': 'marketing_consent',
+  'marketing opt in': 'marketing_consent',
+  'email marketing consent': 'email_marketing_consent',
+  'email marketing': 'email_marketing_consent',
+  'sms marketing consent': 'sms_marketing_consent',
+  'sms marketing': 'sms_marketing_consent',
+  'text marketing': 'sms_marketing_consent',
+  // Opt-out columns ask the opposite question, so they must never land on a consent field.
+  'marketing opt out': 'marketing_opt_out',
+  'opt out of marketing': 'marketing_opt_out',
+  'opted out of marketing': 'marketing_opt_out',
+  'opted out': 'marketing_opt_out',
+  'opt out': 'marketing_opt_out',
+  unsubscribed: 'marketing_opt_out',
+  'do not market': 'marketing_opt_out',
+  'do not contact': 'marketing_opt_out',
+  'no marketing': 'marketing_opt_out',
 };
 
 const BOOKING_ALIASES: Record<string, string> = {

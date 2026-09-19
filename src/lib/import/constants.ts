@@ -44,6 +44,8 @@ export const CLIENT_FIELDS: SchemaField[] = [
   { key: 'date_of_birth', label: 'Date of Birth', required: false, type: 'date' },
   { key: 'gender', label: 'Gender', required: false, type: 'text' },
   { key: 'marketing_consent', label: 'Marketing Consent', required: false, type: 'boolean' },
+  /** The opposite question: Yes means the client does not want marketing (Unsubscribed, Do not contact). */
+  { key: 'marketing_opt_out', label: 'Opted out of marketing', required: false, type: 'boolean' },
   { key: 'sms_marketing_consent', label: 'SMS marketing consent', required: false, type: 'boolean' },
   { key: 'email_marketing_consent', label: 'Email marketing consent', required: false, type: 'boolean' },
   { key: 'sms_reminder_consent', label: 'SMS reminder consent', required: false, type: 'boolean' },

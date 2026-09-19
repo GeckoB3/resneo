@@ -1,7 +1,14 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { eraseGuestCompliance } from '@/lib/compliance/gdpr';
+import { marketingRestoreForUndo, undoNeedsCurrentMarketing } from '@/lib/import/import-marketing-consent';
 
-export async function runImportUndo(admin: SupabaseClient, sessionId: string, venueId: string): Promise<void> {
+export async function runImportUndo(
+  admin: SupabaseClient,
+  sessionId: string,
+  venueId: string,
+  /** Who pressed Undo; recorded against any marketing change the undo reverts. */
+  actorStaffId: string | null = null,
+): Promise<void> {
   const { data: session } = await admin
     .from('import_sessions')
     .select('id, undo_available_until, undone_at, status')
@@ -127,6 +134,17 @@ export async function runImportUndo(admin: SupabaseClient, sessionId: string, ve
       await admin.from('guests').delete().eq('id', r.record_id).eq('venue_id', venueId);
     } else if (r.action === 'updated' && r.previous_data) {
       const prev = r.previous_data;
+      let currentMarketing: { marketing_consent: boolean | null; marketing_opt_out: boolean | null } | null = null;
+      if (undoNeedsCurrentMarketing(prev)) {
+        const { data } = await admin
+          .from('guests')
+          .select('marketing_consent, marketing_opt_out')
+          .eq('id', r.record_id)
+          .eq('venue_id', venueId)
+          .maybeSingle();
+        currentMarketing = (data as typeof currentMarketing) ?? null;
+      }
+      const marketingRestore = marketingRestoreForUndo(prev, currentMarketing);
       await admin
         .from('guests')
         .update({
@@ -136,13 +154,26 @@ export async function runImportUndo(admin: SupabaseClient, sessionId: string, ve
           phone: prev.phone as string | null,
           visit_count: prev.visit_count as number,
           tags: prev.tags as string[],
-          marketing_opt_out: prev.marketing_opt_out as boolean,
+          ...marketingRestore,
           last_visit_date: prev.last_visit_date as string | null,
           custom_fields: prev.custom_fields as Record<string, unknown>,
           updated_at: new Date().toISOString(),
         })
         .eq('id', r.record_id)
         .eq('venue_id', venueId);
+      if (marketingRestore.marketing_consent !== undefined) {
+        // The import logged its marketing change on the contact's timeline; log the reversal too.
+        const { error: consentLogErr } = await admin.from('guest_marketing_consent_events').insert({
+          venue_id: venueId,
+          guest_id: r.record_id,
+          actor_staff_id: actorStaffId,
+          marketing_consent: marketingRestore.marketing_consent,
+          marketing_opt_out: Boolean(marketingRestore.marketing_opt_out),
+        });
+        if (consentLogErr) {
+          console.warn('[import undo] marketing consent log insert failed', consentLogErr.message);
+        }
+      }
     }
   }
 

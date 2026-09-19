@@ -5,8 +5,8 @@ export const article: HelpArticle = {
   helpSection: "gs-grow",
   title: "Importing your data",
   description: "Bring your clients and bookings over from a spreadsheet in a few guided steps, with a 24-hour undo if anything looks off.",
-  tags: ["import","data","csv","excel","migration","clients","bookings","undo"],
-  verified: '2026-09-17',
+  tags: ["import","data","csv","excel","migration","clients","bookings","undo","marketing","marketing consent","opt out","unsubscribe"],
+  verified: '2026-09-19',
   content: `# Importing your data
 
 Bring your client list and booking history across from your old system. ResNeo matches your columns for you, checks the file, and gives you 24 hours to undo the whole thing.
@@ -26,6 +26,20 @@ What each file must contain:
 - A **Staff list** needs a **Staff member name**.
 
 A service name and a staff name on your bookings make the result far more useful, but they are not required.
+
+## Marketing permission for imported clients
+
+Clients you import can receive your marketing messages straight away: ResNeo ticks **Marketing consent** for each one, dated the day of the import. The exception is a client your file says has said no. Any of these marks them as opted out instead:
+
+- A marketing consent column that says No (or False, Opted out or Unsubscribed).
+- An opt-out or unsubscribed column that says Yes. On the **Map** step, match a column like this to **Opted out of marketing**, not to **Marketing Consent**, because in that column Yes means no.
+- An email or SMS marketing consent column that says No. A client has one marketing setting that covers both, so a no to either counts as a no.
+
+A blank or unreadable answer leaves the default in place.
+
+If a client is already in ResNeo and you choose **Update existing**, the import only ticks **Marketing consent** when they have never made a marketing choice in ResNeo. It never signs someone back up after they opted out, and a No in your file always opts them out.
+
+> **Good to know:** this assumes everyone in your file is happy to hear from you. If your old system recorded who said no, keep that column in the file so ResNeo can respect it. You can change any client later under **Preferences** in **Contacts**.
 
 ## Do a small test first
 
@@ -124,6 +138,7 @@ Click **Undo**, confirm "Undo this import? This will revert created records.", a
 - Clients it created are deleted.
 - Bookings it created are deleted.
 - Clients it updated are put back as they were, so any edits you made since are lost too.
+- Marketing settings the import changed are put back too, unless the client has unsubscribed or someone has changed their setting since. Those later changes are kept.
 - Services, staff and calendars the import created are deleted.
 
 > **Warning:** after 24 hours the undo stops working, but the **Undo** button stays on screen. Clicking it then says the undo window has expired and nothing changes. Past that point, unwanted records have to be removed by hand.
@@ -135,6 +150,7 @@ Click **Undo**, confirm "Undo this import? This will revert created records.", a
 | I cannot find Data import | It is not a tab, and staff logins do not see it | Sign in as an admin, open **Settings**, stay on **Profile**, scroll to **Data import** and click **Open Data Import** |
 | **Continue** is locked on Upload | A file is still labelled **Not sure**, or is still being reorganised | Label every file and wait for the notice to clear |
 | Clients or bookings appear twice | The same file was imported twice | Undo the second import within 24 hours, otherwise remove the duplicates by hand |
+| Imported clients are skipped by a bulk message | Your file said they opted out, or they had already made a marketing choice in ResNeo | Open the client in **Contacts**, then **Preferences**, and tick **Marketing consent** if they agreed to hear from you |
 | An imported booking is on a day I am closed | Imported bookings are not checked against your opening hours | Open it from the calendar and move or cancel it |
 | Clients got unexpected reminders | **Send upcoming reminders for imported bookings** was ticked | Undo within 24 hours if you can, and turn the affected messages off under **Settings**, then **Communications** |
 | Dates are a month out | The file was read as US dates | Undo, re-import, and choose **DD/MM/YYYY (UK)** |

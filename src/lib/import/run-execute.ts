@@ -58,6 +58,14 @@ import {
 import { shouldFlushImportProgressToDb } from '@/lib/import/import-execute-progress';
 import { evaluateClientRowNameRule } from '@/lib/import/client-row-name-rule';
 import {
+  IMPORT_MARKETING_CHANGE_KEY,
+  fileMarketingAnswer,
+  guestHasMarketingChoiceOnRecord,
+  marketingForNewImportedGuest,
+  marketingUpdateForExistingGuest,
+  marketingUpdateNeedsHistory,
+} from '@/lib/import/import-marketing-consent';
+import {
   bookingImportCommsFields,
   parseSendImportRemindersFromSession,
   recordImportPassedReminderLogs,
@@ -563,18 +571,9 @@ export async function runImportExecuteBatch(
       const tagsRaw = targets.tags?.split(/[,;]/).map((t) => t.trim()).filter(Boolean) ?? [];
       const tags = normaliseGuestTagsInput(tagsRaw);
 
-      const marketing = targets.marketing_consent?.trim();
-      let marketingOptOut: boolean | null = null;
-      if (marketing) {
-        const x = marketing.toLowerCase();
-        if (['yes', 'true', '1', 'y'].includes(x)) marketingOptOut = false;
-        else if (['no', 'false', '0', 'n'].includes(x)) marketingOptOut = true;
-      }
-      if (marketingOptOut === null && targets.email_marketing_consent?.trim()) {
-        const emOpt = normaliseBoolean(targets.email_marketing_consent);
-        if (emOpt === true) marketingOptOut = false;
-        if (emOpt === false) marketingOptOut = true;
-      }
+      // Imported contacts may be sent marketing unless the file says otherwise
+      // (see import-marketing-consent.ts for what counts as the file saying no).
+      const marketingAnswer = fileMarketingAnswer(targets);
 
       const customFields: Record<string, unknown> = { ...custom };
       // Source-row breadcrumbs: power the post-import QA spot-check (compare
@@ -627,8 +626,9 @@ export async function runImportExecuteBatch(
         lastVisitDate = parseDateString(targets.last_visit_date, datePref ?? undefined).iso;
       }
 
+      // The marketing columns are read so an update can decide, and so undo can restore them.
       const guestSelectColumns =
-        'id, first_name, last_name, email, phone, visit_count, tags, marketing_opt_out, custom_fields, last_visit_date';
+        'id, first_name, last_name, email, phone, visit_count, tags, marketing_opt_out, marketing_consent, marketing_consent_at, custom_fields, last_visit_date';
       const existingByEmail = email
         ? await findGuestByEmailCi<Record<string, unknown> & { id: string }>(
             admin,
@@ -660,7 +660,7 @@ export async function runImportExecuteBatch(
         if (gid) {
           const { data: g } = await admin
             .from('guests')
-            .select('id, first_name, last_name, email, phone, visit_count, tags, marketing_opt_out, custom_fields, last_visit_date')
+            .select(guestSelectColumns)
             .eq('venue_id', venueId)
             .eq('id', gid)
             .maybeSingle();
@@ -672,13 +672,25 @@ export async function runImportExecuteBatch(
 
       if (existing && shouldUpdateExisting(issues)) {
         const prev = existing as Record<string, unknown>;
+        const prevMarketing = {
+          marketing_consent: prev.marketing_consent as boolean | null,
+          marketing_opt_out: prev.marketing_opt_out as boolean | null,
+        };
+        const marketingPatch = marketingUpdateForExistingGuest(prevMarketing, marketingAnswer, {
+          hasRecordedChoice: marketingUpdateNeedsHistory(prevMarketing, marketingAnswer)
+            ? await guestHasMarketingChoiceOnRecord(admin, venueId, existing.id)
+            : false,
+          nowIso: new Date().toISOString(),
+        });
+
         await admin.from('import_records').insert({
           session_id: sessionId,
           venue_id: venueId,
           record_type: 'guest',
           record_id: existing.id,
           action: 'updated',
-          previous_data: prev,
+          // What the import changes about marketing rides along, so undo reverts only that.
+          previous_data: { ...prev, [IMPORT_MARKETING_CHANGE_KEY]: marketingPatch },
         });
 
         const mergedCustom = {
@@ -694,13 +706,27 @@ export async function runImportExecuteBatch(
             email: email ?? (prev.email as string | null),
             phone: ph.e164 ?? (prev.phone as string | null),
             tags: tags.length ? tags : (prev.tags as string[] | undefined),
-            marketing_opt_out: marketingOptOut ?? (prev.marketing_opt_out as boolean | null),
+            ...marketingPatch,
             visit_count: visitCount ?? (prev.visit_count as number),
             last_visit_date: lastVisitDate ?? (prev.last_visit_date as string | null),
             custom_fields: mergedCustom,
             updated_at: new Date().toISOString(),
           })
           .eq('id', existing.id);
+
+        if (Object.keys(marketingPatch).length > 0) {
+          // The contact timeline shows marketing changes from this log, as it does a staff edit.
+          const { error: consentLogErr } = await admin.from('guest_marketing_consent_events').insert({
+            venue_id: venueId,
+            guest_id: existing.id,
+            actor_staff_id: staffId,
+            marketing_consent: marketingPatch.marketing_consent ?? Boolean(prevMarketing.marketing_consent),
+            marketing_opt_out: marketingPatch.marketing_opt_out ?? Boolean(prevMarketing.marketing_opt_out),
+          });
+          if (consentLogErr) {
+            console.warn('[import execute] marketing consent log insert failed', consentLogErr.message);
+          }
+        }
 
         if (refProvider && targets.external_client_id?.trim()) {
           await upsertGuestExternalRef(
@@ -762,7 +788,7 @@ export async function runImportExecuteBatch(
           visit_count: visitCount ?? 0,
           last_visit_date: lastVisitDate,
           tags,
-          marketing_opt_out: marketingOptOut ?? false,
+          ...marketingForNewImportedGuest(marketingAnswer, new Date().toISOString()),
           custom_fields: customFields,
         },
       });
@@ -903,7 +929,8 @@ export async function runImportExecuteBatch(
         phone: input.phone,
         global_guest_hash: hashGuest(input.email, input.phone),
         visit_count: 0,
-        marketing_opt_out: false,
+        // A bookings file carries no marketing columns, so the import's default applies.
+        ...marketingForNewImportedGuest(null, new Date().toISOString()),
         custom_fields: customFields,
       },
     });

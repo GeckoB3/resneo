@@ -3,9 +3,9 @@ import type { HelpArticle } from '../../types';
 export const article: HelpArticle = {
   slug: 'import-issues',
   title: 'Data import problems',
-  description: 'A stuck wizard step, validation you cannot clear, ambiguous dates, a part-finished run, and the 24-hour undo.',
-  tags: ['import', 'csv', 'errors'],
-  verified: '2026-09-12',
+  description: 'A stuck wizard step, validation you cannot clear, ambiguous dates, a part-finished run, imported clients missing from marketing, and the 24-hour undo.',
+  tags: ['import', 'csv', 'errors', 'marketing', 'marketing consent', 'bulk message'],
+  verified: '2026-09-19',
   content: `
 # Data import problems
 
@@ -37,9 +37,15 @@ Settle everything it flags:
 
 **Importing** runs large files in batches and saves as it goes, so you can leave the page and come back to that step to pick it up. If it ends on **Import failed**, the reason is shown underneath. If it finishes, **Import complete** gives you the counts and **Skipped rows**, plus **Download import report (CSV)** listing what was left out and why.
 
+## Imported clients are skipped by a bulk message
+
+A bulk message from **Contacts** only goes to clients with marketing permission. An import gives every client it creates **Marketing consent**, unless your file said they opted out: a No in a marketing consent column, a Yes in an opt-out column, or a No to email or SMS marketing. A client who was already in ResNeo keeps any marketing choice they had made there.
+
+To let someone hear from you, open them in **Contacts**, then **Preferences**, tick **Marketing consent**, untick **Opt out of marketing**, and click **Save marketing preferences**. Only do this for someone who agreed to hear from you.
+
 ## Undo, and its 24 hours
 
-A completed import shows **Undo available until** a date and time on the **Data import** screen. The clock starts when the import finishes, not when you approve it. **Undo** deletes the clients, bookings, services, staff and calendars it created, and puts updated clients back as they were, losing any edits you made since.
+A completed import shows **Undo available until** a date and time on the **Data import** screen. The clock starts when the import finishes, not when you approve it. **Undo** deletes the clients, bookings, services, staff and calendars it created, and puts updated clients back as they were, losing any edits you made since. The exception is marketing: an unsubscribe or a change to a client's marketing setting made after the import is kept.
 
 Past the deadline the button stays on screen but answers **Undo window has expired**, and nothing changes. **Delete** is not a substitute: it only removes the session and its uploaded files, and leaves your data where it is.
 

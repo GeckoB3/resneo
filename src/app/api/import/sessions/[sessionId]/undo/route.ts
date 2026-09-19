@@ -12,7 +12,7 @@ export async function POST(
   const { sessionId } = await params;
 
   try {
-    await runImportUndo(staff.db, sessionId, staff.venue_id);
+    await runImportUndo(staff.db, sessionId, staff.venue_id, staff.id);
     return NextResponse.json({ ok: true });
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Undo failed';

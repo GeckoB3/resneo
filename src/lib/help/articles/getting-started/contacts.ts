@@ -5,8 +5,8 @@ export const article: HelpArticle = {
   helpSection: "gs-run",
   title: "Your contacts (CRM)",
   description: "See every client's visits, bookings, and contact details in one place, and reach them in a click.",
-  tags: ["contacts","crm","guests","tags","segments","merge","messaging","bulk message","marketing permission","marketing consent","opt out","skipped","rebooking","gdpr","documents","export"],
-  verified: '2026-09-12',
+  tags: ["contacts","crm","guests","tags","segments","merge","messaging","bulk message","marketing permission","marketing consent","opt out","skipped","import","rebooking","gdpr","documents","export"],
+  verified: '2026-09-19',
   content: `# Your contacts (CRM)
 
 **Contacts** is your client book: who they are, what they have booked, what you have sent them, and what you know about them. Open it from **Contacts** in the sidebar. Everyone on your team can use it, and the list keeps itself up to date as bookings come in.
@@ -107,7 +107,7 @@ Everything you send is listed in **Message log** underneath, with the channel, w
 3. **Add tag…** applies one tag to all of them. Type a new tag or click one of your **Existing tags**.
 4. **Message** sends the same message to each of them. Pick a **Channel**, write the **Message**, then click **Send**. Anyone without an email or phone for that channel is skipped, and you are told who.
 
-> **Important: a bulk message from Contacts counts as marketing.** Ticking several contacts and clicking **Message** only sends to the people who have given marketing permission, which means **Marketing consent** is ticked and **Opt out of marketing** is not (both under **Preferences**). The rest are skipped, and the confirmation says how many, for example "Message sent to 12 clients, 3 skipped (no marketing permission)". If none of them has given permission, nothing is sent at all and ResNeo says so.
+> **Important: a bulk message from Contacts counts as marketing.** Ticking several contacts and clicking **Message** only sends to the people who have given marketing permission, which means **Marketing consent** is ticked and **Opt out of marketing** is not (both under **Preferences**). The rest are skipped, and the confirmation says how many, for example "Message sent to 12 clients, 3 skipped (no marketing permission)". If none of them has given permission, nothing is sent at all and ResNeo says so. Clients you import arrive with **Marketing consent** ticked unless your file said they opted out, see [importing your data](/help/getting-started/importing-data).
 >
 > Messaging one person from their own record always sends, and so does messaging from a booking. Those are about a booking they have made, not marketing.
 

@@ -5,8 +5,8 @@ export const article: HelpArticle = {
   helpSection: 'growth',
   title: 'Importing clients and bookings',
   description: 'Where the importer lives, what each of the six wizard steps does, how duplicates and odd dates are settled, and how the 24-hour undo differs from deleting a session.',
-  tags: ['import', 'csv', 'migration', 'admin'],
-  verified: '2026-09-12',
+  tags: ['import', 'csv', 'migration', 'admin', 'marketing', 'marketing consent', 'opt out'],
+  verified: '2026-09-19',
   content: `
 # Importing clients and bookings
 
@@ -62,6 +62,8 @@ If a file is laid out as a printed report rather than a table, ResNeo reorganise
 
 If the guesses are poor, open **Tell the AI about your data (optional)**, describe your file in plain English, and click **Save & re-run AI mapping**. **Re-run AI mapping** redoes the current file on its own. Anything still missing is listed under **Before you can continue, this file needs:**.
 
+Marketing columns need care. A column recording that the client agreed to marketing maps to **Marketing Consent**, or to **Email marketing consent** or **SMS marketing consent** when it names one channel. A column recording that they said no, such as Unsubscribed or Do not contact, maps to **Opted out of marketing**, because in that column Yes means no. The next section says what the import does with the answers.
+
 ### 3. Review
 
 **Review** lists every column with its **Sample**, **Action** and **Detail**, each marked **Imported**, **Not imported**, **Custom field** or **Split into fields**. This is where you see what is being left behind, before anything is written.
@@ -93,6 +95,25 @@ Large files run in batches with a progress bar. You can leave the page and come 
 
 When it finishes you get **Import complete** with the counts of clients (including how many existing ones were updated), bookings and skipped rows, plus **Download import report (CSV)**. If something goes wrong you get **Import failed** with the reason and a link **Back to import history**.
 
+## Marketing permission
+
+Every client an import creates gets **Marketing consent**, dated the day of the import, so a bulk message from **Contacts** reaches them. The exception is a client whose row says they said no:
+
+- **Marketing Consent** says No, False, Opted out or Unsubscribed.
+- **Opted out of marketing** says Yes.
+- **Email marketing consent** or **SMS marketing consent** says No. A client has one marketing setting covering both channels, so a no to either one opts them out of both.
+
+Those clients arrive with **Opt out of marketing** ticked instead. A blank or unreadable answer leaves the default in place. Clients created from a booking history file follow the same default, because a booking file has no marketing columns.
+
+For a client already in ResNeo, set to **Update existing**:
+
+- A No in your file always opts them out.
+- Otherwise the import ticks **Marketing consent** only if they have never made a marketing choice in ResNeo. A client who unsubscribed, changed the setting in their own account, or whose setting your team changed keeps it.
+
+Any change the import makes to a client's marketing setting shows on their timeline in **Contacts**, credited to the admin who ran the import.
+
+> **Good to know:** this assumes everyone in your file is happy to hear from you. If your old system recorded who said no, keep that column in the file so ResNeo can respect it.
+
 ## The 24-hour undo
 
 Once an import finishes, its row shows **Undo available until** a date and time. The clock starts when the import finishes, not when you approve it.
@@ -102,6 +123,7 @@ Click **Undo**, confirm "Undo this import? This will revert created records.", a
 - Clients it created are deleted.
 - Bookings it created are deleted.
 - Clients it updated are put back as they were, so any edits you made since are lost too.
+- Marketing settings the import changed are put back too, unless the client has unsubscribed or someone has changed their setting since. Those later changes are kept.
 - Services, staff and calendars the import created are deleted.
 
 > **Warning:** after 24 hours the undo stops working, but the **Undo** button stays on screen. Clicking it then tells you the window has expired and nothing changes. Past that point, unwanted records have to be removed by hand.
@@ -115,6 +137,7 @@ Click **Undo**, confirm "Undo this import? This will revert created records.", a
 | Dates are a month out | The file was read as US dates | Undo, re-import, and choose **DD/MM/YYYY (UK)** |
 | Clients or bookings appear twice | The same file was imported twice | Undo the second import within 24 hours, otherwise remove the duplicates by hand |
 | Clients got unexpected reminders | **Send upcoming reminders for imported bookings** was ticked | Undo within 24 hours if you can, and switch the affected messages off under **Settings → Communications** |
+| Imported clients are skipped by a bulk message | Your file said they opted out, or they had already made a marketing choice in ResNeo | Open the client in **Contacts**, then **Preferences**, and tick **Marketing consent** if they agreed to hear from you |
 | An imported booking is on a day you are closed | Imported bookings are not checked against your opening hours | Open it from the calendar and move or cancel it |
 | Removing a session did not remove the data | **Delete** only clears the session and its files | Use **Undo** on a completed import instead |
 | **Undo** does nothing | The 24 hours have passed | Remove the records by hand |

@@ -242,6 +242,7 @@ Rules:
 - Booking exports usually contain the client's details too (name, email, phone) — map those to the guest_*/client_* booking fields; they are used to create or match client records.
 - A column whose values combine date AND time (e.g. "2026-03-14 14:30" or "14/03/2026 2:30 PM") can be mapped directly to "booking_date" — the time component is recovered automatically. Use action "split" into booking_date + booking_time only when the user asks for it.
 - For staff files, a single combined name column maps to "staff_name"; separate columns map to "staff_first_name"/"staff_last_name".
+- Marketing columns: a column recording that the client AGREED to marketing (Marketing Consent, Accepts Marketing, Opted in, Newsletter) maps to "marketing_consent", or to "email_marketing_consent" / "sms_marketing_consent" when it names one channel. A column recording that the client REFUSED or withdrew (Unsubscribed, Opted out, Do not contact, No marketing) maps to "marketing_opt_out". Never map an opt-out column to a consent field: its Yes means the client does NOT want marketing.
 - Columns holding genuinely useful client data with no matching target field (e.g. allergies, referral source) should NOT be ignored — leave them action "map" with target_field null is invalid, so use action "ignore" but say in reasoning that the user may want a custom field for it.
 - Confidence: 'high' if clearly matching, 'medium' if reasonable guess, 'low' if uncertain.
 - Prefer 'ignore' over a low-confidence mapping for columns you are unsure about.
